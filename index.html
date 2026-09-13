@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ironvale — an isometric adventure</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 16'%3E%3Cpolygon points='16,0 32,8 16,16 0,8' fill='%235f9640'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="world"></canvas>
+
+<div id="hud">
+  <div id="skills"></div>
+
+  <div id="topright">
+    <div id="minibox">
+      <canvas id="minimap" width="176" height="176"></canvas>
+      <div id="coords">—, —</div>
+    </div>
+    <div id="menubar">
+      <button id="btn-quests">Quests</button>
+      <button id="btn-help">Help</button>
+      <button id="btn-menu">Menu</button>
+    </div>
+  </div>
+
+  <div id="panel-right">
+    <div id="hprow"><div id="hpbar"><div id="hpfill"></div></div><span id="hpnum">0/0</span></div>
+    <div id="combatrow"><span>Combat Lv <b id="cl">1</b></span><span id="playertitle"></span></div>
+    <div id="equiprow"></div>
+    <div id="invgrid"></div>
+    <div id="coinrow">Coins: <b id="coins">0</b></div>
+  </div>
+
+  <div id="actionbar"></div>
+  <div id="log"></div>
+</div>
+
+<div id="ctxmenu" class="hidden"></div>
+<div id="tooltip" class="hidden"></div>
+
+<div id="loading" class="overlay hidden">
+  <div class="panel-box center">
+    <h1 class="logo">IRONVALE</h1>
+    <div id="loadlabel">Raising the island of Ironvale...</div>
+    <div class="progress"><div id="loadbar"></div></div>
+  </div>
+</div>
+
+<div id="title" class="overlay hidden">
+  <div class="panel-box center">
+    <h1 class="logo">IRONVALE</h1>
+    <p class="sub">An original isometric adventure in the old MMO style.<br>
+    Carve out a legend on a vast, procedurally generated island.<br>
+    <span class="tiny">Chop. Mine. Smith. Fight. Quest. Repeat.</span></p>
+    <label class="seedrow">World seed
+      <input id="seedinput" type="text" placeholder="random" maxlength="10">
+    </label>
+    <button id="btn-new">New Adventure</button>
+    <button id="btn-continue" class="hidden">Continue</button>
+    <button id="btn-how">How to Play</button>
+  </div>
+</div>
+
+<div id="dialog" class="overlay hidden">
+  <div id="dialogbox">
+    <canvas id="portrait" width="96" height="96"></canvas>
+    <div id="dialogtext">
+      <div id="speakername"></div>
+      <div id="speakerlines"></div>
+      <div id="dialogchoices"></div>
+      <button id="dialogcontinue">Continue &#9656;</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal" class="overlay hidden">
+  <div class="panel-box" id="modalbox">
+    <div id="modaltitle"></div>
+    <div id="modalbody"></div>
+    <button id="modalclose">Close</button>
+  </div>
+</div>
+
+<div id="death" class="overlay hidden">
+  <div class="panel-box center">
+    <h1 class="death-t">You have fallen&hellip;</h1>
+    <p id="deathmsg"></p>
+    <button id="btn-respawn">Return to the town of Oldgate</button>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

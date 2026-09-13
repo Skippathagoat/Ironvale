@@ -1,0 +1,421 @@
+/* Ironvale — HUD styles. Retro MMO look, no external assets. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #0d1420;
+  font-family: "Courier New", ui-monospace, Menlo, Consolas, monospace;
+  color: #e8e2d0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#world {
+  position: fixed;
+  inset: 0;
+  display: block;
+  image-rendering: pixelated;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- HUD panels ---------- */
+
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#hud > * { pointer-events: auto; }
+
+.panel {
+  background: rgba(14, 18, 28, 0.88);
+  border: 2px solid #3a4356;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55), inset 0 0 12px rgba(0, 0, 0, 0.5);
+}
+
+/* skills (top-left) */
+#skills {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.skillrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 190px;
+}
+.skillrow canvas { image-rendering: pixelated; flex: 0 0 auto; }
+.skillname { width: 78px; font-size: 11px; font-weight: bold; }
+.xpbar {
+  flex: 1;
+  height: 5px;
+  background: #1a1f2b;
+  border: 1px solid #000;
+}
+.xpfill { height: 100%; width: 0%; background: #3fae4a; }
+.skilllvl { width: 20px; text-align: right; font-size: 11px; font-weight: bold; color: #ffd76b; }
+
+/* minimap + menu (top-right) */
+#topright {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+#minibox { padding: 4px; }
+#minimap { display: block; image-rendering: pixelated; }
+#coords { font-size: 10px; text-align: center; color: #9aa3b5; margin-top: 2px; }
+#menubar { display: flex; gap: 4px; }
+#menubar button {
+  pointer-events: auto;
+  background: #232a3a;
+  color: #e8e2d0;
+  border: 2px solid #3a4356;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+#menubar button:hover { background: #2f3950; }
+
+/* inventory panel (bottom-right) */
+#panel-right {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 8px;
+  width: 268px;
+}
+#hprow { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+#hpbar { flex: 1; height: 12px; background: #1a1f2b; border: 1px solid #000; }
+#hpfill { height: 100%; width: 100%; background: #2ecc71; transition: width 0.15s; }
+#hpnum { font-size: 11px; font-weight: bold; }
+#combatrow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+#combatrow b { color: #ffd76b; }
+#playertitle { color: #f0d878; font-style: italic; }
+#equiprow { display: flex; gap: 3px; margin-bottom: 5px; }
+#invgrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+}
+.slot {
+  width: 58px;
+  height: 58px;
+  background: #171c28;
+  border: 2px solid #2c3446;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+}
+.slot:hover { border-color: #5a6b8f; }
+.slot canvas { image-rendering: pixelated; }
+.slot .count {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-size: 10px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
+}
+.eqslot { width: 48px; height: 48px; }
+#coinrow { margin-top: 6px; font-size: 12px; font-weight: bold; color: #ffd76b; }
+
+/* action bar (bottom-center) */
+#actionbar {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 5px;
+  padding: 6px;
+}
+.abtn {
+  width: 44px;
+  height: 44px;
+  background: #232a3a;
+  border: 2px solid #3a4356;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.abtn canvas { image-rendering: pixelated; }
+.abtn:hover { background: #2f3950; }
+.abtn.active { border-color: #ffd76b; box-shadow: 0 0 8px rgba(255, 215, 107, 0.5); }
+
+/* log (bottom-left) */
+#log {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  width: 400px;
+  height: 150px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: auto;
+}
+#log .line { text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.8); }
+#log .line.sys { color: #b9c2d4; }
+#log .line.loot { color: #9ad0ff; }
+#log .line.quest { color: #ffd76b; font-weight: bold; }
+#log .line.warn { color: #ff9966; }
+#log::-webkit-scrollbar { width: 6px; }
+#log::-webkit-scrollbar-thumb { background: #3a4356; }
+
+/* ---------- context menu / tooltip ---------- */
+
+#ctxmenu {
+  position: fixed;
+  z-index: 60;
+  min-width: 150px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#ctxmenu button, .ctxhead + button {
+  background: #232a3a;
+  color: #e8e2d0;
+  border: 1px solid #3a4356;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  text-align: left;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+#ctxmenu button:hover { background: #33405e; }
+#ctxmenu button:disabled { opacity: 0.45; cursor: default; }
+.ctxhead {
+  font-size: 11px;
+  font-weight: bold;
+  color: #ffd76b;
+  padding: 3px 10px 4px;
+  border-bottom: 1px solid #3a4356;
+  margin-bottom: 2px;
+}
+
+#tooltip {
+  position: fixed;
+  z-index: 70;
+  max-width: 260px;
+  padding: 6px 9px;
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+  color: #cfd6e4;
+}
+#tooltip b { color: #ffd76b; }
+
+/* ---------- overlays ---------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(5, 8, 14, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.panel-box {
+  background: #131826;
+  border: 3px solid #3a4356;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.6), 0 14px 40px rgba(0, 0, 0, 0.6);
+  padding: 22px 26px;
+  max-width: 560px;
+  width: calc(100% - 60px);
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+}
+.panel-box.center { text-align: center; }
+.logo {
+  margin: 0 0 6px;
+  font-size: 44px;
+  letter-spacing: 10px;
+  color: #f0d878;
+  text-shadow: 0 3px 0 #7a5a1a, 0 6px 14px rgba(0, 0, 0, 0.8);
+}
+.sub { color: #b9c2d4; font-size: 13px; line-height: 1.7; }
+.tiny { color: #7d8aa0; font-size: 11px; letter-spacing: 2px; }
+.seedrow {
+  display: block;
+  font-size: 12px;
+  color: #9aa3b5;
+  margin: 14px 0 10px;
+}
+.seedrow input {
+  background: #0d1220;
+  border: 2px solid #3a4356;
+  color: #ffd76b;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+  width: 110px;
+  margin-left: 6px;
+}
+.panel-box button {
+  display: block;
+  width: 100%;
+  margin: 7px 0;
+  background: #232a3a;
+  color: #e8e2d0;
+  border: 2px solid #3a4356;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 10px;
+  cursor: pointer;
+}
+.panel-box button:hover { background: #2f3950; border-color: #5a6b8f; }
+.panel-box.center button { width: 70%; margin-left: auto; margin-right: auto; }
+
+.progress {
+  width: 70%;
+  margin: 16px auto 0;
+  height: 10px;
+  background: #1a1f2b;
+  border: 1px solid #3a4356;
+}
+#loadbar { height: 100%; width: 0%; background: #3fae4a; transition: width 0.1s; }
+
+/* dialog */
+#dialog { background: rgba(5, 8, 14, 0.55); }
+#dialogbox {
+  display: flex;
+  gap: 14px;
+  width: min(640px, calc(100% - 60px));
+  background: #131826;
+  border: 3px solid #3a4356;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.6);
+  padding: 16px;
+  align-items: stretch;
+}
+#portrait {
+  width: 96px;
+  height: 96px;
+  flex: 0 0 auto;
+  background: #0d1220;
+  border: 2px solid #2c3446;
+  image-rendering: pixelated;
+}
+#dialogtext { display: flex; flex-direction: column; }
+#speakername { color: #ffd76b; font-weight: bold; font-size: 15px; margin-bottom: 6px; }
+#speakerlines { font-size: 13px; line-height: 1.65; flex: 1; color: #dfe5f0; }
+#dialogchoices { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+#dialogchoices button {
+  background: #232a3a;
+  color: #e8e2d0;
+  border: 2px solid #3a4356;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  text-align: left;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+#dialogchoices button:hover { background: #33405e; }
+#dialogcontinue {
+  align-self: flex-end;
+  margin-top: 10px;
+  background: #232a3a;
+  color: #ffd76b;
+  border: 2px solid #3a4356;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+#dialogcontinue:hover { background: #2f3950; }
+
+/* modal */
+#modaltitle {
+  font-size: 18px;
+  font-weight: bold;
+  color: #ffd76b;
+  border-bottom: 2px solid #3a4356;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+#modalbody { font-size: 13px; line-height: 1.55; }
+#modalbody p { margin: 6px 0; }
+#modalbody h3 { margin: 12px 0 6px; font-size: 14px; color: #9ad0ff; }
+#modalclose {
+  align-self: flex-end;
+  width: auto;
+  margin-top: 12px;
+}
+#modalbox { display: flex; flex-direction: column; }
+
+/* shop rows */
+.shop-coins { font-weight: bold; color: #ffd76b; margin-bottom: 8px; }
+.shoprow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #222a3c;
+}
+.shoprow canvas { image-rendering: pixelated; flex: 0 0 auto; }
+.shopname { flex: 1; font-size: 12px; }
+.shopprice { font-size: 12px; color: #ffd76b; white-space: nowrap; }
+.shoprow button {
+  background: #232a3a;
+  color: #e8e2d0;
+  border: 2px solid #3a4356;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.shoprow button:hover { background: #2f3950; }
+.shoprow button:disabled { opacity: 0.45; cursor: default; }
+.questbox {
+  border: 1px solid #2c3446;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: #171c28;
+}
+.questbox h3 { margin: 0 0 4px; font-size: 13px; }
+.questbox p { margin: 0; font-size: 12px; color: #b9c2d4; }
+
+/* death */
+.death-t {
+  color: #e05a4a;
+  font-size: 30px;
+  letter-spacing: 3px;
+  text-shadow: 0 3px 0 #4a1510;
+}
+#deathmsg { color: #b9c2d4; font-size: 13px; }
+
+/* small screens */
+@media (max-width: 1100px) {
+  #log { width: 300px; }
+  #panel-right { width: 240px; }
+  .slot { width: 52px; height: 52px; }
+}

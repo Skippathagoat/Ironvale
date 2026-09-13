@@ -1,0 +1,48 @@
+{
+  "apiVersion": "v1",
+  "spec": {
+    "kind": "Workflow",
+    "spec": {
+      "type": "sequential",
+      "steps": [
+        {
+          "kind": "BuildService",
+          "spec": {
+            "name": "ironvale-build",
+            "vcsData": {
+              "projectUrl": "https://github.com/REPLACE-ME/ironvale",
+              "projectType": "github",
+              "projectBranch": "main"
+            },
+            "buildConfiguration": {
+              "pathIgnoreRules": [".git", "node_modules", "*.log"],
+              "isAllowList": false,
+              "dockerfile": "Dockerfile"
+            }
+          }
+        },
+        {
+          "kind": "DeploymentService",
+          "spec": {
+            "name": "ironvale",
+            "billing": { "deploymentPlan": "nf-compute-1" },
+            "deployment": {
+              "instances": 1,
+              "docker": { "configType": "default" },
+              "internal": { "id": "ironvale-build", "branch": "main", "buildSHA": "latest" },
+              "storage": { "ephemeralStorage": { "storageSize": 100 } }
+            },
+            "ports": [
+              {
+                "name": "http",
+                "internalPort": 80,
+                "public": true,
+                "protocol": "HTTP"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

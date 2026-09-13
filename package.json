@@ -1,0 +1,10 @@
+{
+  "name": "ironvale",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ironvale — an original isometric pixel-art MMORPG that runs in the browser.",
+  "scripts": {
+    "start": "python3 -m http.server 8080"
+  }
+}
