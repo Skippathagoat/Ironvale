@@ -91,10 +91,15 @@ export function bonus(g, key) {
   return b;
 }
 
+let levelUpHook = null;
+export function setLevelUpHook(fn) { levelUpHook = fn; }
+
 export function addXp(g, id, amt) {
   const before = level(g, id);
   g.player.stats[id] += amt;
-  return level(g, id) - before;
+  const after = level(g, id);
+  if (after > before && levelUpHook) levelUpHook(id, after);
+  return after - before;
 }
 
 export function rollAttack(atkLv, strLv, defLv) {
