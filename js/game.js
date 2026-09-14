@@ -292,6 +292,7 @@ export function eatItem(g, slotInInv) {
   if (!s) return false;
   const def = ITEMS[s.id];
   if (!def.heals) return false;
+  if (g.player.hp >= maxHp(g)) return 0; // don't waste food at full health
   const before = g.player.hp;
   g.player.hp = Math.min(maxHp(g), g.player.hp + def.heals);
   s.n -= 1;
@@ -390,5 +391,22 @@ export function restoreGame(world, data) {
     }
   }
   g.player.hp = clamp(data.player.hp || maxHp(g), 1, maxHp(g));
+  // the regenerated world may differ slightly (e.g. trees where there were
+  // none before) — never leave the player inside a blocked tile
+  if (!isWalkable(world, Math.floor(g.player.x), Math.floor(g.player.y))) {
+    let spot = null;
+    for (let r = 1; r <= 4 && !spot; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          if (isWalkable(world, Math.floor(g.player.x) + dx, Math.floor(g.player.y) + dy)) {
+            spot = { x: Math.floor(g.player.x) + dx, y: Math.floor(g.player.y) + dy };
+            break;
+          }
+        }
+      }
+    }
+    if (spot) { g.player.x = spot.x + 0.5; g.player.y = spot.y + 0.5; }
+  }
   return g;
 }

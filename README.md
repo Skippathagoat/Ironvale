@@ -7,7 +7,7 @@ An **original** 3D MMORPG that runs entirely in the browser — in the spirit of
 ## Features
 
 - **Huge world**: 640×640-tile procedurally generated island (deterministic per seed) with biomes — beaches, grasslands, forests, hills, mountains and snow peaks — plus the town of **Oldgate** with buildings, roads and a plaza.
-- **Click-to-move** (right-click) and **WASD** movement, A* pathfinding, smooth third-person camera.
+- **Click-to-move** (left or right click on the ground), A* pathfinding, smooth third-person camera.
 - **Graphics**: real-time 3D (three.js) — vertex-colored heightfield terrain in lazy-loaded chunks, instanced low-poly trees & ore rocks, dynamic sun with soft shadows, distance fog, animated water, glowing furnace, walking animations. If WebGL is unavailable (or the URL has `?nogl`) it automatically falls back to the classic 2D isometric renderer.
 - **7 skills with XP & levels**: Attack, Strength, Defence, Woodcutting, Mining, Smithing, Cooking — classic skill bars with level-ups.
 - **Combat**: melee with 5 monster types (rats, slimes, wolves, bears, rock trolls), hit/miss rolls, damage numbers, monster AI (wander / chase / attack / return), respawns.
@@ -23,7 +23,7 @@ An **original** 3D MMORPG that runs entirely in the browser — in the spirit of
 
 | Input | Action |
 | --- | --- |
-| Right-click ground / WASD / arrows | Walk |
+| Click the ground (left or right) | Walk |
 | Left-click entity | Context menu (Attack / Chop / Mine / Talk / Trade / Smith / Cook) |
 | Left-click ground | Walk |
 | Left-click inventory item | Quick eat / equip |

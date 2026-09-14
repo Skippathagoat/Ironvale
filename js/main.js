@@ -40,7 +40,6 @@ let minimapSrc = null;
 let saveTimer = 0;
 let mouseDown = false;
 
-const keys = new Set();
 const SAVE_KEY = 'ironvale_save_v1';
 
 const $ = (id) => document.getElementById(id);
@@ -287,7 +286,7 @@ async function startWorld(seed, data) {
   log('Welcome to Ironvale.', 'sys');
   if (!data) {
     log('Talk to Elder Bram in the town square for your first quest.', 'quest');
-    log('Left-click things to interact. Right-click or WASD to walk.', 'sys');
+    log('Click the ground to walk. Left-click trees, rocks, the forge and villagers to interact.', 'sys');
   } else {
     log('You return to Ironvale.', 'sys');
   }
@@ -440,7 +439,7 @@ function updateHUD() {
 // ---------- action bar ----------
 
 const ACTIONS = [
-  { id: 'move', icon: 'icon_move', label: 'Move (right-click / WASD)' },
+  { id: 'move', icon: 'icon_move', label: 'Move — click the ground' },
   { id: 'attack', icon: 'icon_attack', label: 'Attack — then click a monster' },
   { id: 'chop', icon: 'icon_chop', label: 'Chop — then click a tree' },
   { id: 'mine', icon: 'icon_mine', label: 'Mine — then click a rock' },
@@ -660,24 +659,7 @@ function pathToAdjacent(at) {
 function updatePlayer(dt) {
   const p = g.player;
   p.moving = false;
-  // keyboard movement
-  let dx = 0, dy = 0;
-  if (keys.has('KeyW') || keys.has('ArrowUp')) { dx -= 1; dy -= 1; }
-  if (keys.has('KeyS') || keys.has('ArrowDown')) { dx += 1; dy += 1; }
-  if (keys.has('KeyA') || keys.has('ArrowLeft')) { dx -= 1; dy += 1; }
-  if (keys.has('KeyD') || keys.has('ArrowRight')) { dx += 1; dy -= 1; }
-  if (dx || dy) {
-    p.path = null;
-    p.pending = null;
-    const inv = 1 / Math.hypot(dx, dy);
-    const spd = 4.6 * dt;
-    const mx = p.x + dx * inv * spd, my = p.y + dy * inv * spd;
-    if (!boxBlocked(mx, p.y)) p.x = mx;
-    if (!boxBlocked(p.x, my)) p.y = my;
-    p.moving = true;
-    p.animT += dt;
-    return;
-  }
+  // movement is click-to-move only
   if (p.action === 'attack') { updateAttack(dt); return; }
   if (p.action === 'chop' || p.action === 'mine') { updateResource(dt); return; }
   if (p.pending) { updatePending(dt); return; }
@@ -689,7 +671,7 @@ function updateAttack(dt) {
   const m = p.target;
   if (!m || !m.alive) { p.target = null; setAction('move'); return; }
   const dist = Math.hypot(m.x - p.x, m.y - p.y);
-  if (dist > 1.05) {
+  if (dist > 1.45) { // attack range includes diagonal neighbours (sqrt(2) ≈ 1.414)
     const key = Math.floor(m.x) + ',' + Math.floor(m.y);
     if (key !== p.monsterTileKey || !p.path) {
       p.monsterTileKey = key;
@@ -743,7 +725,9 @@ function updatePending(dt) {
   const p = g.player;
   const pd = p.pending;
   const dist = Math.hypot(pd.tx + 0.5 - p.x, pd.ty + 0.5 - p.y);
-  if (dist > 1.15) {
+  // 1.45: a diagonal neighbour is sqrt(2) ≈ 1.414 away — must count as arrived
+  // (1.15 made walk-ups loop forever whenever only diagonal tiles were free)
+  if (dist > 1.45) {
     if (!p.path) pathToAdjacent({ x: pd.tx, y: pd.ty });
     followPath(dt, 4.6);
     return;
@@ -776,6 +760,7 @@ function playerAttack(m) {
   const res = rollAttack(A, S_, md.def);
   if (res.hit) {
     m.hp -= res.dmg;
+    m.lastHit = gameNow; // pause regen while in combat (passives would otherwise out-heal early players)
     m.flash = 0.15;
     addFloat(m.x, m.y, String(res.dmg), '#ff5555');
     sfx.hit();
@@ -915,7 +900,11 @@ function updateMonsters(dt) {
     if (dist > 90) { m.moving = false; continue; }
     m.moving = false;
     m.flash = Math.max(0, m.flash - dt);
-    if ((m.state === 'idle' || m.state === 'wander') && m.hp < md.hp) {
+    // regen only out of combat: monsters that just got hit (or are engaged)
+    // do not heal — otherwise passive monsters out-heal level-1 players
+    const inCombat = m.state === 'chase' || m.state === 'attack' ||
+      (gameNow - (m.lastHit || 0) < 4);
+    if ((m.state === 'idle' || m.state === 'wander') && !inCombat && m.hp < md.hp) {
       m.hp = Math.min(md.hp, m.hp + dt * (md.hp / 12));
     }
     if (m.state === 'idle' || m.state === 'wander') {
@@ -1314,6 +1303,9 @@ function buildWorld3D() {
 
   s.staticsDirty = false;
   updateCamera();
+  // snap the camera to the player — no fly-in from the world origin
+  s.camera.position.set(g.player.x, 27, g.player.y + 21);
+  s.camera.lookAt(g.player.x, 1, g.player.y);
 }
 
 function updatePlayer3D() {
@@ -1499,7 +1491,7 @@ function visibleRange() {
 }
 
 function drawGround() {
-  const phase = (gameNow * 2) | 0;
+  const phase = ((gameNow * 2) | 0) % 4; // 2 Hz shimmer, 4 reusable buckets (no unbounded cache growth)
   const r = visibleRange();
   const bx0 = Math.max(0, Math.floor(r.txMin / BLOCK) - 1);
   const bx1 = Math.min(Math.ceil(world.size / BLOCK) - 1, Math.floor(r.txMax / BLOCK) + 1);
@@ -2134,7 +2126,7 @@ function openHelp() {
   const body = document.createElement('div');
   body.className = 'shop';
   const lines = [
-    'MOVE — right-click the ground, or WASD / arrow keys.',
+    'MOVE — click the ground to walk there (left or right click).',
     'INTERACT — left-click a monster, tree, rock, NPC, furnace or pot.',
     'ACTION BAR — pick Attack / Chop / Mine / Talk, then left-click a target (or just left-click and choose from the menu).',
     'INVENTORY — left-click an item to eat/equip it, right-click for more options. Drop unwanted items to make room.',
@@ -2276,20 +2268,13 @@ function bindInput() {
   window.addEventListener('keydown', (e) => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
     initAudio();
-    keys.add(e.code);
     if (e.code === 'Escape') {
       if (!els.ctxmenu.classList.contains('hidden')) { hideCtxMenu(); return; }
       if (!els.modal.classList.contains('hidden')) { closeModal(); return; }
       if (!els.dialog.classList.contains('hidden')) { closeDialogue(); return; }
       return;
     }
-    if (state === 'playing' && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
-      g.player.path = null;
-      g.player.pending = null;
-    }
   });
-  window.addEventListener('keyup', (e) => keys.delete(e.code));
-  window.addEventListener('blur', () => keys.clear());
 
   canvas.addEventListener('mousedown', (e) => {
     initAudio();
@@ -2326,7 +2311,12 @@ function bindInput() {
   canvas.addEventListener('mouseleave', hideTooltip);
 
   document.addEventListener('mousedown', (e) => {
-    if (!e.target.closest('#ctxmenu')) hideCtxMenu();
+    // canvas clicks are handled by the canvas mousedown listener itself
+    // (it hides the menu first, then reopens it if a new target was picked);
+    // only close here for clicks on other UI.
+    if (e.target === canvas) return;
+    if (e.target.closest && e.target.closest('#ctxmenu')) return;
+    hideCtxMenu();
   });
 }
 
@@ -2338,6 +2328,26 @@ setLevelUpHook((skillId, newLevel) => {
   log(`Your ${sk ? sk.name : skillId} level is now ${newLevel}!`, 'quest');
   addFloat(g.player.x, g.player.y, 'Level up!', '#7CFC00');
 });
+
+// ---------- ?debug introspection hook (used by the headless QA suite) ----------
+if (window.location.search.includes('debug')) {
+  window.__ironvale = {
+    get state() { return state; },
+    get g() { return g; },
+    get world() { return world; },
+    screenPos: (x, y) => ({ x: (x - y) * (TILE_W / 2) + camX, y: (x + y) * (TILE_H / 2) + camY }),
+    pickAt: (mx, my) => pick(mx, my),
+    count: (id) => countItem(g, id),
+    grantXp: (skillId, n) => addXp(g, skillId, n),
+    teleport: (x, y) => {
+      if (!g) return;
+      g.player.x = x; g.player.y = y;
+      g.player.path = null; g.player.pending = null; g.player.target = null;
+      setAction('move');
+    },
+    killPlayer: () => { g.player.hp = 0; onPlayerDeath(); }
+  };
+}
 
 // ---------- boot ----------
 

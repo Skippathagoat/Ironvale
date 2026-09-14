@@ -267,7 +267,11 @@ function addFeatures(world, seed, onProgress) {
       if (inTown(x, y)) continue;
       if (t === T.GRASS || t === T.TALL) {
         const m = fbm(x * 0.016 + 400, y * 0.016 + 400, (seed ^ 0x51ab) | 0);
-        if (m > 0.5 && hash2(x, y, seed + 77) < 0.16) terrain[i] = T.OAK;
+        if (m > 0.5) {
+          if (hash2(x, y, seed + 77) < 0.16) terrain[i] = T.OAK; // wet biome → oak
+        } else if (hash2(x, y, seed + 77) < 0.10) {
+          terrain[i] = T.PINE; // dry biome → pine
+        }
       } else if (t === T.HILLS && hash2(x, y, seed + 131) < 0.055) {
         terrain[i] = hash2(x, y, seed + 132) < 0.5 ? T.COPPER : T.TIN;
       } else if (t === T.MOUNT) {
