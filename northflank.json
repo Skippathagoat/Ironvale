@@ -10,7 +10,7 @@
           "spec": {
             "name": "ironvale-build",
             "vcsData": {
-              "projectUrl": "https://github.com/REPLACE-ME/ironvale",
+              "projectUrl": "https://github.com/Skippathagoat/Ironvale",
               "projectType": "github",
               "projectBranch": "main"
             },
