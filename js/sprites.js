@@ -6,7 +6,7 @@
 
 export const S = {}; // filled by buildSprites()
 
-function makeSprite(rows, pal, scale = 2) {
+function makeSprite(rows, pal, scale = 4) {
   const w = Math.max(...rows.map((r) => r.length));
   const h = rows.length;
   const cv = document.createElement('canvas');
@@ -100,8 +100,8 @@ const TREE_OAK = [
   '.GDLGGGGGGGGG.',
   '..GGGGGDGGGG..',
   '....GGGGGG....',
-  '.....TTTT.....',
-  '.....TTTT.....',
+  '......TT......',
+  '......TT......',
   '......TT......'
 ];
 const TREE_PINE = [

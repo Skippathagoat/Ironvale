@@ -2,8 +2,8 @@
 // Pure module: no DOM/canvas access (safe to import in node for tests).
 
 export const SIZE = 640; // world is SIZE x SIZE tiles
-export const TILE_W = 32;
-export const TILE_H = 16;
+export const TILE_W = 64;
+export const TILE_H = 32;
 
 export const T = {
   OCEAN: 0, SHALLOW: 1, SAND: 2, GRASS: 3, TALL: 4, HILLS: 5, MOUNT: 6, SNOW: 7,

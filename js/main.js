@@ -59,25 +59,27 @@ const els = {
 // ---------- ground colors (type -> [main, alt]) ----------
 
 // classic-era palette: warm muted greens, deep blue water, earthy roads
+// near-identical twin tones: classic RS ground reads as one surface, with
+// all visual interest coming from the painted texture speckles — not stripes.
 const GROUND_COLORS = {
-  [T.OCEAN]:   ['#1e3f74', '#24487e'],
-  [T.SHALLOW]: ['#2c5c94', '#3a72ac'],
-  [T.SAND]:    ['#d8c078', '#cbb06a'],
-  [T.GRASS]:   ['#5a8c3a', '#528434'],
-  [T.TALL]:    ['#4f7f33', '#487730'],
-  [T.HILLS]:   ['#8a8f62', '#82845a'],
-  [T.MOUNT]:   ['#99a0a8', '#90969e'],
-  [T.SNOW]:    ['#e9edf2', '#dde3ea'],
-  [T.OAK]:     ['#528434', '#4a7c30'],
-  [T.PINE]:    ['#7f8458', '#777b50'],
-  [T.COPPER]:  ['#85897c', '#7d8174'],
-  [T.TIN]:     ['#85897c', '#7d8174'],
-  [T.IRON]:    ['#85897c', '#7d8174'],
-  [T.GOLD]:    ['#9aa0a8', '#91969e'],
-  [T.BARE]:    ['#9a9c92', '#92948a'],
-  [T.STUMP]:   ['#528434', '#4a7c30'],
-  [T.ROAD]:    ['#a09068', '#96875f'],
-  [T.PLAZA]:   ['#cabb92', '#c1b28a']
+  [T.OCEAN]:   ['#1e3f74', '#214279'],
+  [T.SHALLOW]: ['#2c5c94', '#2f5e96'],
+  [T.SAND]:    ['#d8c078', '#d5bd75'],
+  [T.GRASS]:   ['#57893b', '#558638'],
+  [T.TALL]:    ['#4c7c31', '#4b7a2f'],
+  [T.HILLS]:   ['#8a8f62', '#898d60'],
+  [T.MOUNT]:   ['#99a0a8', '#989ea5'],
+  [T.SNOW]:    ['#e9edf2', '#e7ecf1'],
+  [T.OAK]:     ['#57893b', '#558638'],
+  [T.PINE]:    ['#7f8458', '#7e8256'],
+  [T.COPPER]:  ['#85897c', '#84887b'],
+  [T.TIN]:     ['#85897c', '#84887b'],
+  [T.IRON]:    ['#85897c', '#84887b'],
+  [T.GOLD]:    ['#9aa0a8', '#999fa6'],
+  [T.BARE]:    ['#9a9c92', '#999b91'],
+  [T.STUMP]:   ['#57893b', '#558638'],
+  [T.ROAD]:    ['#a09068', '#9f8f67'],
+  [T.PLAZA]:   ['#cabb92', '#c9b98f']
 };
 
 const MINI_COLORS = {
@@ -133,9 +135,48 @@ function updateCamera() {
 }
 
 // ---------- ground block cache ----------
+// Ground tiles are painted with subtle texture detail (grass tufts, cobbles,
+// water sparkle) like the classic client — never flat posterized color.
+
+const GROUND_TEX_KIND = {
+  [T.OCEAN]: 'water', [T.SHALLOW]: 'water', [T.SAND]: 'sand',
+  [T.GRASS]: 'grass', [T.TALL]: 'tall', [T.HILLS]: 'hill',
+  [T.MOUNT]: 'rock', [T.SNOW]: 'snow',
+  [T.OAK]: 'grass', [T.PINE]: 'grass',
+  [T.COPPER]: 'rock', [T.TIN]: 'rock', [T.IRON]: 'rock', [T.GOLD]: 'rock',
+  [T.BARE]: 'rock', [T.STUMP]: 'grass',
+  [T.ROAD]: 'road', [T.PLAZA]: 'plaza'
+};
+const TEX_STYLE = {
+  grass: { d: '#3f682c', l: '#69993f', n: 5, h: 1 },
+  tall:  { d: '#335c1f', l: '#62913a', n: 7, h: 2 },
+  water: { d: null,     l: '#4a7ab0', n: 3, h: 1, shine: true },
+  sand:  { d: '#c2a65c', l: null,     n: 4, h: 1 },
+  road:  { d: '#8a7c58', l: '#b3a37b', n: 6, h: 1 },
+  plaza: { d: '#b3a27a', l: '#ddd0aa', n: 5, h: 1 },
+  hill:  { d: '#74784c', l: '#9aa06e', n: 4, h: 1 },
+  rock:  { d: '#6e7178', l: '#9ea4ab', n: 4, h: 1 },
+  snow:  { d: '#ccd8e4', l: null,     n: 3, h: 1 }
+};
+
+// tile diamond: top corner (sx,sy), half-width 32, half-height 16 (device px at 2x)
+function paintTileTex(c, sx, sy, kind, tx, ty, phase) {
+  const st = TEX_STYLE[kind];
+  if (!st) return;
+  const rnd = mulberry32(((world.seed + 101) ^ 0x51ed270b) + tx * 7349 + ty * 9151);
+  const w = st.shine ? 8 : 4, h = st.h * 2;
+  for (let k = 0; k < st.n * 3 && k < 40; k++) {
+    const r1 = rnd(), r2 = rnd(), r3 = rnd();
+    let u = 3 + r1 * 58, v = 3 + r2 * 26;
+    if (st.shine) u = 3 + ((r1 * 58 + phase * 9 + tx * 5 + ty * 13) % 58);
+    if (Math.abs(u - 32) / 32 + Math.abs(v - 16) / 16 > 0.9) continue;
+    c.fillStyle = (st.d && st.l) ? (r3 < 0.5 ? st.d : st.l) : (st.d || st.l);
+    c.fillRect((sx + u - 2) | 0, (sy + v - 1) | 0, w, h);
+  }
+}
 
 const groundCache = new Map();
-const GROUND_CACHE_MAX = 320;
+const GROUND_CACHE_MAX = 160;
 const BLOCK = 8;
 
 function getGroundBlock(bx, by, phase) {
@@ -143,7 +184,7 @@ function getGroundBlock(bx, by, phase) {
   let cv = groundCache.get(key);
   if (cv) return cv;
   cv = document.createElement('canvas');
-  cv.width = 256; cv.height = 128;
+  cv.width = 512; cv.height = 256;
   const c = cv.getContext('2d');
   const size = world.size;
   for (let j = 0; j < BLOCK; j++) {
@@ -155,15 +196,16 @@ function getGroundBlock(bx, by, phase) {
       let col;
       if (t === T.OCEAN || t === T.SHALLOW) col = (tx * 7 + ty * 13 + phase * 11) % 5 < 2 ? pair[1] : pair[0];
       else col = hash2(tx, ty, world.seed) < 0.5 ? pair[0] : pair[1];
-      const sx = (i - j) * 16 + 128, sy = (i + j) * 8;
+      const sx = (i - j) * 32 + 256, sy = (i + j) * 16;
       c.fillStyle = col;
       c.beginPath();
       c.moveTo(sx, sy);
-      c.lineTo(sx + 16, sy + 8);
-      c.lineTo(sx, sy + 16);
-      c.lineTo(sx - 16, sy + 8);
+      c.lineTo(sx + 32, sy + 16);
+      c.lineTo(sx, sy + 32);
+      c.lineTo(sx - 32, sy + 16);
       c.closePath();
       c.fill();
+      paintTileTex(c, sx, sy, GROUND_TEX_KIND[t] || 'grass', tx, ty, phase);
     }
   }
   if (groundCache.size >= GROUND_CACHE_MAX) {
@@ -946,8 +988,8 @@ function update(dt) {
 // ---------- rendering ----------
 
 function visibleRange() {
-  const a0 = (-camX - 32) / 16, a1 = (W - camX + 32) / 16;
-  const b0 = (-camY - 32) / 8, b1 = (H - camY + 32) / 8;
+  const a0 = (-camX - 48) / (TILE_W / 2), a1 = (W - camX + 48) / (TILE_W / 2);
+  const b0 = (-camY - 32) / (TILE_H / 2), b1 = (H - camY + 32) / (TILE_H / 2);
   return {
     a0, a1, b0, b1,
     txMin: Math.max(0, Math.floor((a0 + b0) / 2)),
@@ -968,14 +1010,14 @@ function drawGround() {
     for (let by = by0; by <= by1; by++) {
       const cv = getGroundBlock(bx, by, phase);
       const wpos = worldToScreen(bx * BLOCK, by * BLOCK);
-      ctx.drawImage(cv, wpos.x - 128, wpos.y);
+      ctx.drawImage(cv, wpos.x - 256, wpos.y);
     }
   }
 }
 
 function drawSpriteAt(spr, px, py, yoff = 0) {
   const s = worldToScreen(px, py);
-  ctx.drawImage(spr.cv, s.x - spr.w / 2, s.y + 8 - spr.h + yoff);
+  ctx.drawImage(spr.cv, s.x - spr.w / 2, s.y + TILE_H / 2 - spr.h + yoff);
 }
 
 function drawScene() {
@@ -1055,17 +1097,17 @@ function drawMonster(m) {
   const name = m.type + (frame ? '_B' : '_A');
   const spr = S[name];
   if (!spr) return;
-  const bob = m.moving ? -Math.abs(Math.sin(m.animT * 9)) * 2 : 0;
+  const bob = m.moving ? -Math.abs(Math.sin(m.animT * 9)) * 3 : 0;
   drawSpriteAt(spr, m.x, m.y, bob);
   if (m.flash > 0) {
     const s = worldToScreen(m.x, m.y);
-    ctx.drawImage(spr.flash, s.x - spr.w / 2, s.y + 8 - spr.h + bob);
+    ctx.drawImage(spr.flash, s.x - spr.w / 2, s.y + TILE_H / 2 - spr.h + bob);
   }
   // hp bar when damaged
   if (m.hp < md.hp) {
     const s = worldToScreen(m.x, m.y);
-    const w = 26;
-    const x = s.x - w / 2, y = s.y + 8 - spr.h - 8;
+    const w = 40;
+    const x = s.x - w / 2, y = s.y + TILE_H / 2 - spr.h - 10;
     ctx.fillStyle = '#222';
     ctx.fillRect(x, y, w, 3);
     ctx.fillStyle = '#c0392b';
@@ -1077,9 +1119,9 @@ function drawMonster(m) {
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(s.x, s.y);
-    ctx.lineTo(s.x + 16, s.y + 8);
-    ctx.lineTo(s.x, s.y + 16);
-    ctx.lineTo(s.x - 16, s.y + 8);
+    ctx.lineTo(s.x + TILE_W / 4, s.y + TILE_H / 4);
+    ctx.lineTo(s.x, s.y + TILE_H / 2);
+    ctx.lineTo(s.x - TILE_W / 4, s.y + TILE_H / 4);
     ctx.closePath();
     ctx.stroke();
   }
@@ -1091,12 +1133,12 @@ function drawPlayer() {
   const spr = S['player_' + (frame ? 'B' : 'A')];
   if (!spr) return;
   const s = worldToScreen(p.x, p.y);
-  ctx.drawImage(spr.cv, s.x - spr.w / 2, s.y + 8 - spr.h);
+  ctx.drawImage(spr.cv, s.x - spr.w / 2, s.y + TILE_H / 2 - spr.h);
   // held weapon
   const wid = g.equip.weapon;
   if (wid && S[wid]) {
     const ws = S[wid];
-    ctx.drawImage(ws.cv, s.x + spr.w / 2 - 8, s.y + 8 - spr.h + 6);
+    ctx.drawImage(ws.cv, s.x + spr.w / 2 - 20, s.y + TILE_H / 2 - spr.h + 14);
   }
   // swing arc
   if (p.swingT > 0) {
@@ -1104,14 +1146,14 @@ function drawPlayer() {
     ctx.strokeStyle = 'rgba(255,255,255,' + (1 - t) + ')';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(s.x, s.y + 8 - spr.h / 2, 16, -Math.PI * 0.7 + t * Math.PI * 1.2, -Math.PI * 0.2 + t * Math.PI * 1.2);
+    ctx.arc(s.x, s.y + TILE_H / 2 - spr.h / 2, 24, -Math.PI * 0.7 + t * Math.PI * 1.2, -Math.PI * 0.2 + t * Math.PI * 1.2);
     ctx.stroke();
   }
   // hp bar
   const mh = maxHp(g);
   if (p.hp < mh) {
-    const w = 28;
-    const x = s.x - w / 2, y = s.y + 8 - spr.h - 10;
+    const w = 40;
+    const x = s.x - w / 2, y = s.y + TILE_H / 2 - spr.h - 12;
     ctx.fillStyle = '#222';
     ctx.fillRect(x, y, w, 3);
     ctx.fillStyle = '#2ecc71';
@@ -1120,16 +1162,16 @@ function drawPlayer() {
 }
 
 function drawFloats() {
-  ctx.font = 'bold 14px monospace';
+  ctx.font = 'bold 16px monospace';
   ctx.textAlign = 'center';
   for (const f of floats) {
     const s = worldToScreen(f.x, f.y);
     const a = 1 - f.age / f.life;
     ctx.globalAlpha = a;
     ctx.fillStyle = '#000';
-    ctx.fillText(f.text, s.x + 1, s.y - 24 - f.age * 22 + 1);
+    ctx.fillText(f.text, s.x + 1, s.y - 36 - f.age * 26 + 1);
     ctx.fillStyle = f.color;
-    ctx.fillText(f.text, s.x, s.y - 24 - f.age * 22);
+    ctx.fillText(f.text, s.x, s.y - 36 - f.age * 26);
     ctx.globalAlpha = 1;
   }
   ctx.textAlign = 'left';
@@ -1148,10 +1190,10 @@ function drawCursor() {
   ctx.strokeStyle = col;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(s.x, s.y - 8);
-  ctx.lineTo(s.x + 16, s.y);
-  ctx.lineTo(s.x, s.y + 8);
-  ctx.lineTo(s.x - 16, s.y);
+  ctx.moveTo(s.x, s.y - TILE_H / 4);
+  ctx.lineTo(s.x + TILE_W / 4, s.y);
+  ctx.lineTo(s.x, s.y + TILE_H / 4);
+  ctx.lineTo(s.x - TILE_W / 4, s.y);
   ctx.closePath();
   ctx.stroke();
 }
