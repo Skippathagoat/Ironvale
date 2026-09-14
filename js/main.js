@@ -712,10 +712,12 @@ function updateResource(dt) {
   if (p.action === 'chop') {
     sfx.chop();
     chopTick(g, at.x, at.y);
+    FX.leaf(at.x + 0.5, at.y + 0.5);
   } else {
     sfx.mine();
     const r = mineTick(g, at.x, at.y);
     if (r.blocked) { log(r.msg, 'warn'); setAction('move'); }
+    else FX.spark(at.x + 0.5, at.y + 0.5);
   }
   invalidateGround();
   markInvDirty();
@@ -776,6 +778,7 @@ function killMonster(m, byPlayer) {
   m.hp = 0;
   m.state = 'dead';
   m.respawnAt = gameNow + 45;
+  FX.poof(m.x, m.y, '215,222,228');
   if (g.player.target === m) g.player.target = null;
   if (!byPlayer) return;
   const md = MONSTERS[m.type];
@@ -822,6 +825,7 @@ function onPlayerDeath() {
   const lost = Math.floor(g.coins * 0.15);
   g.coins -= lost;
   sfx.death();
+  FX.poof(g.player.x, g.player.y, '205,80,70');
   state = 'dead';
   frozen = true;
   g.player.target = null;
@@ -990,6 +994,8 @@ function update(dt) {
     floats[i].age += dt;
     if (floats[i].age > floats[i].life) floats.splice(i, 1);
   }
+  updateParticles(dt);
+  updateAmbient(dt);
   updateCamera();
   saveTimer += dt;
   if (saveTimer > 20) {
@@ -1019,7 +1025,10 @@ const CHUNK_R = 6; // chunk culling radius (16-tile chunks)
 
 function init3D() {
   try {
-    if (window.location.search.includes('nogl')) { console.log('3D disabled via ?nogl — using classic 2D renderer'); return; }
+    if (!window.location.search.includes('3d')) {
+      console.log('Classic 2D renderer (add ?3d to the URL for the full 3D world)');
+      return;
+    }
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     renderer.shadowMap.enabled = true;
@@ -1059,6 +1068,7 @@ function init3D() {
     console.log('3D renderer active');
   } catch (e) {
     console.warn('WebGL unavailable — using the classic 2D renderer:', e.message);
+    show3DFailure('WebGL is not available in this browser — Ironvale is running in the classic 2D look. Remove ?3d from the URL to silence this message.');
     R3D = null;
   }
 }
@@ -1437,12 +1447,12 @@ function updateFloats3D() {
   }
 }
 
-function show3DFailure() {
+function show3DFailure(msg) {
   if (els.threefail) return;
   const d = document.createElement('div');
   d.id = 'threefail';
   d.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:99;background:#3a1515;color:#ffd9d9;border:1px solid #a04040;padding:10px 16px;border-radius:8px;font:13px monospace;max-width:80vw;';
-  d.textContent = 'The 3D renderer hit an error — the view is frozen but the game keeps running. Refresh to retry, or add ?nogl to the URL for the classic 2D look.';
+  d.textContent = msg || 'The 3D renderer hit an error — the view is frozen but the game keeps running. Refresh to retry, or remove ?3d from the URL for the classic 2D look.';
   document.body.appendChild(d);
   els.threefail = d;
 }
@@ -1476,7 +1486,343 @@ function render3D(dt) {
   s.renderer.render(s.scene, s.camera);
 }
 
+// ---------- AAA ambience (2D renderer) ----------
+// Day/night cycle, stars, animated water, soft shadows, particles and
+// warm village glows — a cinematic layer over the classic isometric look.
+// Everything is procedural and cheap: pre-rendered blobs, capped particle
+// counts, subset-based water shimmer.
+
+const DAY_CYCLE = 480; // seconds per full day/night cycle
+
+// keyframes: [phase, multiplyRGB, tintRGB, tintAlpha, nightAmount, bgRGB]
+const DAY_KEYS = [
+  [0.00, [255, 244, 226], [255, 214, 150], 0.18, 0.14, [22, 74, 106]],   // dawn, warm
+  [0.16, [255, 255, 255], [255, 255, 255], 0.0,  0.0,  [20, 84, 122]],   // morning
+  [0.42, [255, 255, 255], [255, 255, 255], 0.0,  0.0,  [19, 92, 134]],   // noon, brightest
+  [0.60, [255, 236, 200], [255, 186, 104], 0.22, 0.18, [32, 76, 104]],   // golden hour
+  [0.72, [226, 202, 230], [176, 112, 196], 0.34, 0.66, [22, 32, 66]],    // dusk
+  [0.84, [172, 182, 220], [96, 116, 196],  0.30, 1.0,  [10, 16, 34]],    // night
+  [0.94, [186, 188, 224], [120, 124, 196], 0.24, 0.85, [12, 19, 38]],    // late night
+  [1.00, [255, 244, 226], [255, 214, 150], 0.18, 0.14, [22, 74, 106]]    // wraps to dawn
+];
+
+function dayPhase() { return (gameNow % DAY_CYCLE) / DAY_CYCLE; }
+function dayInfo() {
+  const p = dayPhase();
+  let a = DAY_KEYS[0], b = DAY_KEYS[DAY_KEYS.length - 1];
+  for (let i = 0; i < DAY_KEYS.length - 1; i++) {
+    if (p >= DAY_KEYS[i][0] && p <= DAY_KEYS[i + 1][0]) { a = DAY_KEYS[i]; b = DAY_KEYS[i + 1]; break; }
+  }
+  const t = (p - a[0]) / Math.max(1e-6, b[0] - a[0]);
+  const lp = (x, y) => x + (y - x) * t;
+  const mul = [0, 1, 2].map((i) => Math.round(lp(a[1][i], b[1][i])));
+  const tint = [0, 1, 2].map((i) => Math.round(lp(a[2][i], b[2][i])));
+  const bg = [0, 1, 2].map((i) => Math.round(lp(a[5][i], b[5][i])));
+  return {
+    phase: p,
+    mul: `rgb(${mul[0]},${mul[1]},${mul[2]})`,
+    tint: `rgb(${tint[0]},${tint[1]},${tint[2]})`,
+    tintA: lp(a[3], b[3]),
+    night: lp(a[4], b[4]),
+    bg: `rgb(${bg[0]},${bg[1]},${bg[2]})`
+  };
+}
+
+let starCv = null;
+function buildStars() {
+  starCv = document.createElement('canvas');
+  starCv.width = 512; starCv.height = 512;
+  const c = starCv.getContext('2d');
+  const rnd = mulberry32(0x5eed);
+  for (let i = 0; i < 170; i++) {
+    const x = (rnd() * 512) | 0, y = (rnd() * 512) | 0;
+    const r = rnd();
+    c.fillStyle = r < 0.8 ? 'rgba(255,255,255,0.85)' : 'rgba(255,226,170,0.9)';
+    c.fillRect(x, y, r < 0.55 ? 1 : 2, r < 0.55 ? 1 : 2);
+  }
+}
+
+// one pre-rendered soft shadow blob, reused for every entity (scaled)
+let shadowBlob = null;
+function buildShadowBlob() {
+  shadowBlob = document.createElement('canvas');
+  shadowBlob.width = 64; shadowBlob.height = 32;
+  const c = shadowBlob.getContext('2d');
+  const g = c.createRadialGradient && c.createRadialGradient(32, 16, 2, 32, 16, 31);
+  if (!g) return;
+  g.addColorStop(0, 'rgba(8,12,20,0.45)');
+  g.addColorStop(0.65, 'rgba(8,12,20,0.20)');
+  g.addColorStop(1, 'rgba(8,12,20,0)');
+  c.save();
+  c.beginPath();
+  c.ellipse(32, 16, 31, 15, 0, 0, Math.PI * 2);
+  c.clip();
+  c.fillStyle = g;
+  c.fillRect(0, 0, 64, 32);
+  c.restore();
+}
+function drawGroundShadow(px, py, rx, alpha = 1) {
+  if (!shadowBlob) return;
+  const s = worldToScreen(px, py);
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(shadowBlob, s.x - rx, s.y + TILE_H / 2 - rx / 2, rx * 2, rx);
+  ctx.globalAlpha = 1;
+}
+
+// pre-rendered warm glow blob (windows, furnace)
+let glowCv = null;
+function buildGlowCv() {
+  glowCv = document.createElement('canvas');
+  glowCv.width = 64; glowCv.height = 64;
+  const c = glowCv.getContext('2d');
+  const g = c.createRadialGradient && c.createRadialGradient(32, 32, 1, 32, 32, 31);
+  if (!g) return;
+  g.addColorStop(0, 'rgba(255,186,88,0.95)');
+  g.addColorStop(0.4, 'rgba(255,170,70,0.35)');
+  g.addColorStop(1, 'rgba(255,170,70,0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, 64, 64);
+}
+
+function drawWaterDynamics() {
+  const r = visibleRange();
+  const t = gameNow;
+  const terr = world.terrain, size = world.size;
+  for (let ty = r.tyMin; ty <= r.tyMax; ty++) {
+    for (let tx = r.txMin; tx <= r.txMax; tx++) {
+      const tl = terr[ty * size + tx];
+      if (tl !== T.OCEAN && tl !== T.SHALLOW) continue;
+      const hsh = hash2(tx, ty, world.seed + 991);
+      // drifting shimmer streaks (only a subset of tiles, staggered)
+      if (hsh < 0.2) {
+        const s = worldToScreen(tx + 0.5, ty + 0.5);
+        const ox = Math.sin(t * 0.8 + hsh * 37) * 16;
+        const a = Math.max(0, 0.16 + 0.16 * Math.sin(t * 2.1 + hsh * 91));
+        ctx.globalAlpha = a;
+        ctx.fillStyle = tl === T.SHALLOW ? '#8ec3ef' : '#4d84bb';
+        ctx.fillRect((s.x - 18 + ox) | 0, (s.y - 2) | 0, 14, 2);
+      }
+      // lapping foam where shallow water meets the beach
+      if (tl === T.SHALLOW) {
+        for (let k = 0; k < 4; k++) {
+          const dx = k === 0 ? 1 : k === 1 ? -1 : 0;
+          const dy = k === 2 ? 1 : k === 3 ? -1 : 0;
+          const nx = tx + dx, ny = ty + dy;
+          if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+          if (terr[ny * size + nx] !== T.SAND) continue;
+          const s = worldToScreen(tx + 0.5 + dx * 0.5, ty + 0.5 + dy * 0.5);
+          const a = 0.30 + 0.28 * Math.sin(t * 2.3 + tx * 3.1 + ty * 1.7);
+          if (a <= 0.1) continue;
+          ctx.globalAlpha = a;
+          ctx.fillStyle = '#eef8ff';
+          ctx.fillRect((s.x - 9) | 0, (s.y - 1 + Math.sin(t * 1.6 + tx) * 1.5) | 0, 18, 2);
+          ctx.fillRect((s.x - 5) | 0, (s.y + 2 + Math.sin(t * 1.2 + ty) * 1.5) | 0, 10, 2);
+        }
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------- particles ----------
+
+let particles = [];
+function spawnParticle(x, y, spec) {
+  particles.push(Object.assign({ x, y, age: 0, vx: 0, vy: 0, g: 0 }, spec));
+  if (particles.length > 170) particles.splice(0, particles.length - 170);
+}
+const FX = {
+  leaf(x, y) {
+    for (let i = 0; i < 10; i++) {
+      const a = Math.random() * Math.PI * 2, v = 0.4 + Math.random() * 0.9;
+      spawnParticle(x, y - 0.6, {
+        vx: Math.cos(a) * v, vy: -1.2 - Math.random() * 1.6, g: 5.5,
+        life: 0.9 + Math.random() * 0.6, size: 2 + Math.random() * 2,
+        color: i % 3 ? '#5c9c44' : '#8a6a3a', kind: 'leaf', spin: (Math.random() - 0.5) * 9
+      });
+    }
+  },
+  spark(x, y) {
+    for (let i = 0; i < 9; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.9, v = 2 + Math.random() * 3;
+      spawnParticle(x, y - 0.4, {
+        vx: Math.cos(a) * v, vy: Math.sin(a) * v, g: 11,
+        life: 0.3 + Math.random() * 0.3, size: 1 + Math.random(),
+        color: Math.random() < 0.5 ? '#ffe9a0' : '#fff6d8', kind: 'spark'
+      });
+    }
+  },
+  poof(x, y, rgb) {
+    for (let i = 0; i < 12; i++) {
+      const a = Math.random() * Math.PI * 2, v = 0.5 + Math.random() * 1.4;
+      spawnParticle(x, y - 0.3, {
+        vx: Math.cos(a) * v, vy: Math.sin(a) * v * 0.5 - 0.5, g: -1.6,
+        life: 0.55 + Math.random() * 0.5, size: 4 + Math.random() * 5,
+        rgb, kind: 'poof'
+      });
+    }
+  },
+  fountain(x, y) {
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * Math.PI * 2, v = 0.8 + Math.random() * 2.4;
+      spawnParticle(x, y, {
+        vx: Math.cos(a) * v, vy: -2.2 - Math.random() * 3.5, g: 4.6,
+        life: 1 + Math.random() * 0.8, size: 2,
+        color: i % 2 ? '#ffd97a' : '#fff2c0', kind: 'spark'
+      });
+    }
+  }
+};
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.age += dt;
+    if (p.age > p.life) { particles.splice(i, 1); continue; }
+    p.vy += p.g * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    if (p.spin) p.rot = (p.rot || 0) + p.spin * dt;
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    const s = worldToScreen(p.x, p.y);
+    const k = 1 - p.age / p.life;
+    if (p.kind === 'poof') {
+      ctx.globalAlpha = 0.4 * k;
+      ctx.fillStyle = `rgba(${p.rgb},${(0.55 * k).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y - 12 - p.age * 10, p.size * (1 + p.age * 1.6), 0, Math.PI * 2);
+      ctx.fill();
+    } else if (p.kind === 'spark') {
+      ctx.globalAlpha = k;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(s.x - p.size / 2, s.y - 16 - p.age * 22, p.size, p.size + 2);
+    } else if (p.kind === 'firefly') {
+      const tw = 0.35 + 0.4 * Math.sin(p.age * 3 + (p.seed || 0));
+      if (tw > 0.05) {
+        ctx.globalAlpha = tw * k;
+        ctx.fillStyle = p.color;
+        const fx = s.x + Math.sin(p.age * 1.3 + (p.seed || 0)) * 6;
+        const fy = s.y - 10 + Math.cos(p.age * 1.7 + (p.seed || 0)) * 4;
+        ctx.fillRect(fx - 1, fy - 1, 2, 2);
+        ctx.globalAlpha = tw * k * 0.35;
+        ctx.fillRect(fx - 3, fy - 3, 6, 6);
+      }
+    } else if (p.kind === 'mote') {
+      ctx.globalAlpha = 0.3 * k;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(s.x, s.y - 8, 1, 1);
+    } else { // leaf
+      ctx.globalAlpha = Math.min(1, k * 1.5);
+      ctx.fillStyle = p.color;
+      ctx.save();
+      ctx.translate(s.x, s.y - 12 - p.age * 4 + Math.sin(p.age * 7 + (p.seed || 0)) * 2);
+      if (p.rot) ctx.rotate(p.rot);
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.7);
+      ctx.restore();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ambient life: drifting motes by day, fireflies after dark
+let ambientT = 0;
+function updateAmbient(dt) {
+  if (!g) return;
+  ambientT -= dt;
+  if (ambientT > 0 || particles.length > 130) return;
+  ambientT = 0.45;
+  const info = dayInfo();
+  const p = g.player;
+  const a = Math.random() * Math.PI * 2, d = 3 + Math.random() * 11;
+  if (info.night > 0.55) {
+    spawnParticle(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, {
+      life: 4 + Math.random() * 4, size: 2, color: '#d8ff9a', kind: 'firefly',
+      seed: Math.random() * 20
+    });
+  } else {
+    spawnParticle(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, {
+      vx: 0.12, vy: -0.06, life: 5, size: 1, kind: 'mote'
+    });
+  }
+}
+
+// ---------- post process (day/night grade, stars, vignette, glows) ----------
+
+let vigGrad = null, vigW = 0, vigH = 0;
+function buildVignette() {
+  vigW = W; vigH = H;
+  vigGrad = ctx.createRadialGradient && ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.38, W / 2, H / 2, Math.max(W, H) * 0.74);
+  if (!vigGrad) return;
+  vigGrad.addColorStop(0, 'rgba(8,10,18,0)');
+  vigGrad.addColorStop(1, 'rgba(8,10,18,0.26)');
+}
+function postProcess() {
+  const info = dayInfo();
+  // stars (drawn after the grade so they stay bright)
+  if (info.night > 0.15 && starCv) {
+    ctx.globalAlpha = ((info.night - 0.15) / 0.85) * 0.9;
+    for (let y = 0; y < H; y += 512) {
+      for (let x = 0; x < W; x += 512) ctx.drawImage(starCv, x, y);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // time-of-day grade
+  if (info.tintA > 0.004 || info.night > 0.01) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = info.mul;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.globalAlpha = info.tintA;
+    ctx.fillStyle = info.tint;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+  }
+  // soft vignette
+  if (!vigGrad || vigW !== W || vigH !== H) buildVignette();
+  if (vigGrad) {
+    ctx.fillStyle = vigGrad;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+// warm light: building windows at night, the furnace always
+function drawGlows() {
+  if (!glowCv) return;
+  const info = dayInfo();
+  const nightGlow = 0.3 + info.night * 0.9;
+  ctx.globalCompositeOperation = 'screen';
+  for (const b of world.buildings) {
+    const spr = S[b.type];
+    if (!spr || !spr.windows || !spr.windows.length) continue;
+    const base = worldToScreen(b.x + (b.w - 1) / 2 + 0.5, b.y + b.h - 0.5);
+    const bx = base.x - spr.w / 2, by = base.y + TILE_H / 2 - spr.h;
+    for (const w of spr.windows) {
+      const fl = 0.85 + 0.15 * Math.sin(gameNow * 6.3 + w.x * 1.7 + w.y * 0.9);
+      ctx.globalAlpha = 0.30 * nightGlow * fl;
+      ctx.drawImage(glowCv, bx + w.x - 24, by + w.y - 24, 48, 48);
+      ctx.globalAlpha = 0.55 * nightGlow * fl;
+      ctx.fillStyle = '#ffcf7a';
+      ctx.fillRect(bx + w.x - 4, by + w.y - 4, 8, 8);
+    }
+  }
+  for (const o of world.objects) {
+    if (o.type !== 'furnace') continue;
+    const s = worldToScreen(o.x + 0.5, o.y + 0.5);
+    const fl = 0.8 + 0.16 * Math.sin(gameNow * 9) + 0.1 * Math.sin(gameNow * 23);
+    ctx.globalAlpha = 0.38 * fl * (0.55 + nightGlow * 0.7);
+    ctx.drawImage(glowCv, s.x - 42, s.y - 46, 84, 84);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+}
+
 // ---------- rendering (classic 2D fallback) ----------
+
 
 function visibleRange() {
   const a0 = (-camX - 48) / (TILE_W / 2), a1 = (W - camX + 48) / (TILE_W / 2);
@@ -1506,9 +1852,11 @@ function drawGround() {
   }
 }
 
-function drawSpriteAt(spr, px, py, yoff = 0) {
+function drawSpriteAt(spr, px, py, yoff = 0, xoff = 0, rim = false) {
   const s = worldToScreen(px, py);
-  ctx.drawImage(spr.cv, s.x - spr.w / 2, s.y + TILE_H / 2 - spr.h + yoff);
+  const x = s.x - spr.w / 2 + xoff, y = s.y + TILE_H / 2 - spr.h + yoff;
+  if (rim && spr.shadow) ctx.drawImage(spr.shadow, x + 2, y + 2);
+  ctx.drawImage(spr.cv, x, y);
 }
 
 function drawScene() {
@@ -1559,13 +1907,27 @@ function drawScene() {
   for (const it of items) {
     if (it.kind === 'tileobj') {
       const spr = S[it.name];
-      if (spr) drawSpriteAt(spr, it.tx + 0.5, it.ty + 0.5);
+      if (!spr) continue;
+      const isTree = it.name === 'tree_oak' || it.name === 'tree_pine';
+      const isRock = it.name.startsWith('rock_');
+      // soft ground shadow, then the object (trees sway in the wind)
+      if (isTree) drawGroundShadow(it.tx + 0.5, it.ty + 0.5, 26);
+      else if (isRock) drawGroundShadow(it.tx + 0.5, it.ty + 0.5, 19);
+      else if (it.name === 'stump') drawGroundShadow(it.tx + 0.5, it.ty + 0.5, 13);
+      else drawGroundShadow(it.tx + 0.5, it.ty + 0.5, 11);
+      const sway = isTree ? Math.sin(gameNow * 1.35 + (it.tx * 7 + it.ty * 13) * 0.37) * 1.6 : 0;
+      drawSpriteAt(spr, it.tx + 0.5, it.ty + 0.5, 0, sway, isTree);
     } else if (it.kind === 'building') {
       const spr = S[it.b.type];
-      if (spr) drawSpriteAt(spr, it.b.x + (it.b.w - 1) / 2 + 0.5, it.b.y + it.b.h - 0.5);
+      if (!spr) continue;
+      const bx = it.b.x + (it.b.w - 1) / 2 + 0.5, by = it.b.y + it.b.h - 0.5;
+      drawGroundShadow(bx, by, spr.w * 0.46, 0.8);
+      drawSpriteAt(spr, bx, by);
     } else if (it.kind === 'obj') {
       const spr = S[it.o.type];
-      if (spr) drawSpriteAt(spr, it.o.x + 0.5, it.o.y + 0.5);
+      if (!spr) continue;
+      drawGroundShadow(it.o.x + 0.5, it.o.y + 0.5, 21);
+      drawSpriteAt(spr, it.o.x + 0.5, it.o.y + 0.5);
     } else if (it.kind === 'monster') {
       drawMonster(it.m);
     } else if (it.kind === 'npc') {
@@ -1579,8 +1941,13 @@ function drawScene() {
 function drawHumanoid(base, px, py, yoff = 0) {
   const spr = S[base];
   if (!spr) return;
-  drawSpriteAt(spr, px, py, yoff);
+  drawGroundShadow(px, py, 15);
+  // gentle idle breath when standing still
+  const bob = yoff || Math.sin(gameNow * 2 + px * 1.7) * 0.8;
+  drawSpriteAt(spr, px, py, bob, 0, true);
 }
+
+const MONSTER_SHADOW_R2D = { rat: 13, slime: 17, wolf: 19, bear: 24, troll: 24 };
 
 function drawMonster(m) {
   const md = MONSTERS[m.type];
@@ -1588,8 +1955,9 @@ function drawMonster(m) {
   const name = m.type + (frame ? '_B' : '_A');
   const spr = S[name];
   if (!spr) return;
-  const bob = m.moving ? -Math.abs(Math.sin(m.animT * 9)) * 3 : 0;
-  drawSpriteAt(spr, m.x, m.y, bob);
+  const bob = m.moving ? -Math.abs(Math.sin(m.animT * 9)) * 3 : Math.sin(gameNow * 1.8 + m.x * 2.3) * 0.8;
+  drawGroundShadow(m.x, m.y, MONSTER_SHADOW_R2D[m.type] || 16);
+  drawSpriteAt(spr, m.x, m.y, bob, 0, true);
   if (m.flash > 0) {
     const s = worldToScreen(m.x, m.y);
     ctx.drawImage(spr.flash, s.x - spr.w / 2, s.y + TILE_H / 2 - spr.h + bob);
@@ -1624,7 +1992,10 @@ function drawPlayer() {
   const spr = S['player_' + (frame ? 'B' : 'A')];
   if (!spr) return;
   const s = worldToScreen(p.x, p.y);
-  ctx.drawImage(spr.cv, s.x - spr.w / 2, s.y + TILE_H / 2 - spr.h);
+  const bob = p.moving ? -Math.abs(Math.sin(p.animT * 9)) * 2 : Math.sin(gameNow * 2.2) * 0.8;
+  drawGroundShadow(p.x, p.y, 15);
+  ctx.drawImage(spr.shadow, s.x - spr.w / 2 + 2, s.y + TILE_H / 2 - spr.h + bob + 2);
+  ctx.drawImage(spr.cv, s.x - spr.w / 2, s.y + TILE_H / 2 - spr.h + bob);
   // held weapon
   const wid = g.equip.weapon;
   if (wid && S[wid]) {
@@ -1718,13 +2089,18 @@ function drawMinimap() {
 }
 
 function render() {
-  ctx.fillStyle = '#0d1420';
+  const info = dayInfo();
+  ctx.fillStyle = info.bg;
   ctx.fillRect(0, 0, W, H);
   if (!world || !g) return;
   drawGround();
+  drawWaterDynamics();
   drawScene();
+  drawParticles();
   drawFloats();
   drawCursor();
+  postProcess();
+  drawGlows();
 }
 
 // ---------- dialogue ----------
@@ -2327,6 +2703,7 @@ setLevelUpHook((skillId, newLevel) => {
   sfx.levelup();
   log(`Your ${sk ? sk.name : skillId} level is now ${newLevel}!`, 'quest');
   addFloat(g.player.x, g.player.y, 'Level up!', '#7CFC00');
+  FX.fountain(g.player.x, g.player.y);
 });
 
 // ---------- ?debug introspection hook (used by the headless QA suite) ----------
@@ -2339,6 +2716,7 @@ if (window.location.search.includes('debug')) {
     pickAt: (mx, my) => pick(mx, my),
     count: (id) => countItem(g, id),
     grantXp: (skillId, n) => addXp(g, skillId, n),
+    setDayPhase: (f) => { gameNow = ((f % 1) + 1) % 1 * DAY_CYCLE; },
     teleport: (x, y) => {
       if (!g) return;
       g.player.x = x; g.player.y = y;
@@ -2355,6 +2733,7 @@ function boot() {
   init3D();
   resize();
   buildSprites();
+  if (!R3D) { buildStars(); buildShadowBlob(); buildGlowCv(); }
   buildSkillsUI();
   buildActionbar();
   bindInventoryEvents();

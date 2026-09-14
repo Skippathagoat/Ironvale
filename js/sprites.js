@@ -32,7 +32,23 @@ function makeSprite(rows, pal, scale = 4) {
   f.globalCompositeOperation = 'source-in';
   f.fillStyle = '#ffffff';
   f.fillRect(0, 0, fc.width, fc.height);
-  return { cv, flash: fc, w: cv.width, h: cv.height };
+  // dark silhouette for rim/depth (AAA pass: drawn offset under the sprite)
+  const sc = document.createElement('canvas');
+  sc.width = cv.width; sc.height = cv.height;
+  const s = sc.getContext('2d');
+  s.drawImage(cv, 0, 0);
+  s.globalCompositeOperation = 'source-in';
+  s.fillStyle = 'rgba(10,16,24,0.55)';
+  s.fillRect(0, 0, sc.width, sc.height);
+  // window glow positions for buildings (device px, relative to sprite top-left)
+  const windows = [];
+  for (let y = 0; y < h; y++) {
+    const row = rows[y];
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] === 'Y') windows.push({ x: x * scale + scale / 2, y: y * scale + scale / 2 });
+    }
+  }
+  return { cv, flash: fc, shadow: sc, windows, w: cv.width, h: cv.height };
 }
 
 // ---------- humanoid (classic proportion: big head, 2-frame walk) ----------
