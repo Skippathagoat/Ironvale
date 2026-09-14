@@ -58,34 +58,35 @@ const els = {
 
 // ---------- ground colors (type -> [main, alt]) ----------
 
+// classic-era palette: warm muted greens, deep blue water, earthy roads
 const GROUND_COLORS = {
-  [T.OCEAN]:   ['#1d4d6b', '#245a7c'],
-  [T.SHALLOW]: ['#3a7d9e', '#4a93b5'],
-  [T.SAND]:    ['#d9c37e', '#cbb46f'],
-  [T.GRASS]:   ['#5f9640', '#578c3a'],
-  [T.TALL]:    ['#548838', '#4d7f33'],
+  [T.OCEAN]:   ['#1e3f74', '#24487e'],
+  [T.SHALLOW]: ['#2c5c94', '#3a72ac'],
+  [T.SAND]:    ['#d8c078', '#cbb06a'],
+  [T.GRASS]:   ['#5a8c3a', '#528434'],
+  [T.TALL]:    ['#4f7f33', '#487730'],
   [T.HILLS]:   ['#8a8f62', '#82845a'],
   [T.MOUNT]:   ['#99a0a8', '#90969e'],
   [T.SNOW]:    ['#e9edf2', '#dde3ea'],
-  [T.OAK]:     ['#548838', '#4d7f33'],
+  [T.OAK]:     ['#528434', '#4a7c30'],
   [T.PINE]:    ['#7f8458', '#777b50'],
   [T.COPPER]:  ['#85897c', '#7d8174'],
   [T.TIN]:     ['#85897c', '#7d8174'],
   [T.IRON]:    ['#85897c', '#7d8174'],
   [T.GOLD]:    ['#9aa0a8', '#91969e'],
   [T.BARE]:    ['#9a9c92', '#92948a'],
-  [T.STUMP]:   ['#548838', '#4d7f33'],
-  [T.ROAD]:    ['#b5a27b', '#ac9973'],
+  [T.STUMP]:   ['#528434', '#4a7c30'],
+  [T.ROAD]:    ['#a09068', '#96875f'],
   [T.PLAZA]:   ['#cabb92', '#c1b28a']
 };
 
 const MINI_COLORS = {
-  [T.OCEAN]: [29, 77, 107], [T.SHALLOW]: [58, 125, 158], [T.SAND]: [217, 195, 126],
-  [T.GRASS]: [95, 150, 64], [T.TALL]: [84, 136, 56], [T.HILLS]: [138, 143, 98],
-  [T.MOUNT]: [153, 160, 168], [T.SNOW]: [233, 237, 242], [T.OAK]: [62, 112, 48],
-  [T.PINE]: [47, 92, 51], [T.COPPER]: [168, 118, 62], [T.TIN]: [185, 190, 196],
+  [T.OCEAN]: [30, 63, 116], [T.SHALLOW]: [44, 92, 148], [T.SAND]: [216, 192, 120],
+  [T.GRASS]: [90, 140, 58], [T.TALL]: [79, 127, 51], [T.HILLS]: [138, 143, 98],
+  [T.MOUNT]: [153, 160, 168], [T.SNOW]: [233, 237, 242], [T.OAK]: [82, 132, 52],
+  [T.PINE]: [127, 132, 88], [T.COPPER]: [168, 118, 62], [T.TIN]: [185, 190, 196],
   [T.IRON]: [125, 129, 136], [T.GOLD]: [217, 185, 60], [T.BARE]: [154, 156, 146],
-  [T.STUMP]: [107, 83, 52], [T.ROAD]: [181, 162, 123], [T.PLAZA]: [202, 187, 146]
+  [T.STUMP]: [107, 83, 52], [T.ROAD]: [160, 144, 104], [T.PLAZA]: [202, 187, 146]
 };
 
 const T_OBJ_SPRITE = {
