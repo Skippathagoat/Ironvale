@@ -7,6 +7,8 @@ import {
   generateWorldAsync, tileAt, isWalkable, pathfind, hash2, mulberry32
 } from './core.js';
 import { buildSprites, S } from './sprites.js';
+import * as THREE from 'three';
+import * as M3D from './models.js';
 import {
   newGame, restoreGame, serialize,
   level, combatLevel, maxHp, bonus, addXp, setLevelUpHook, rollAttack,
@@ -21,7 +23,7 @@ import { initAudio, sfx, setMuted, isMuted } from './sfx.js';
 // ---------- globals ----------
 
 const canvas = document.getElementById('world');
-const ctx = canvas.getContext('2d');
+let ctx = null; // created lazily — only when the 3D renderer is unavailable
 let W = 0, H = 0;
 
 let world = null;
@@ -31,6 +33,7 @@ let frozen = false;            // UI panels open
 let gameNow = 0;
 let lastTs = 0;
 let camX = 0, camY = 0;
+let R3D = null; // three.js renderer state (null = classic 2D fallback)
 let hover = { tx: 0, ty: 0, target: null };
 let floats = [];
 let minimapSrc = null;
@@ -114,9 +117,16 @@ const VILLAGER_LINES = [
 function resize() {
   W = window.innerWidth;
   H = window.innerHeight;
-  canvas.width = W;
-  canvas.height = H;
-  ctx.imageSmoothingEnabled = false;
+  if (R3D) {
+    R3D.renderer.setSize(W, H);
+    R3D.camera.aspect = W / H;
+    R3D.camera.updateProjectionMatrix();
+  } else {
+    if (!ctx) ctx = canvas.getContext('2d');
+    canvas.width = W;
+    canvas.height = H;
+    ctx.imageSmoothingEnabled = false;
+  }
 }
 window.addEventListener('resize', resize);
 
@@ -124,6 +134,16 @@ function worldToScreen(px, py) {
   return { x: (px - py) * (TILE_W / 2) + camX, y: (px + py) * (TILE_H / 2) + camY };
 }
 function screenToTile(mx, my) {
+  if (R3D && !R3D.renderDead) {
+    R3D.ndc.set((mx / W) * 2 - 1, -(my / H) * 2 + 1);
+    R3D.ray.setFromCamera(R3D.ndc, R3D.camera);
+    const o = R3D.ray.ray.origin, d = R3D.ray.ray.direction;
+    if (Math.abs(d.y) > 1e-6) {
+      const t = -o.y / d.y;
+      if (t > 0) return { tx: o.x + d.x * t, ty: o.z + d.z * t };
+    }
+    return { tx: g.player.x, ty: g.player.y };
+  }
   const a = (mx - camX) / (TILE_W / 2);
   const b = (my - camY) / (TILE_H / 2);
   return { tx: (a + b) / 2, ty: (b - a) / 2 };
@@ -216,7 +236,10 @@ function getGroundBlock(bx, by, phase) {
   return cv;
 }
 
-function invalidateGround() { groundCache.clear(); }
+function invalidateGround() {
+  groundCache.clear();
+  if (R3D) R3D.staticsDirty = true;
+}
 
 // ---------- world generation / save flow ----------
 
@@ -256,6 +279,7 @@ async function startWorld(seed, data) {
   invalidateGround();
   groundCache.clear();
   updateCamera();
+  if (R3D) buildWorld3D();
   hideOverlay('loading');
   state = 'playing';
   frozen = false;
@@ -985,7 +1009,482 @@ function update(dt) {
   }
 }
 
-// ---------- rendering ----------
+// ===== 3D RENDERER BLOCK (spliced into main.js before the 2D rendering section) =====
+
+// ---------- 3D renderer (three.js) ----------
+// Modern low-poly 3D: vertex-colored heightfield terrain in lazy chunks,
+// instanced trees/rocks, dynamic sun + soft shadows, fog, animated water,
+// third-person camera. Falls back to the classic 2D renderer if WebGL fails.
+
+const NPC_PALS3D = {
+  bram:  { hair: '#d8d8d8', top: '#7a5a34', legs: '#5a4028' },
+  greta: { hair: '#8a3a2a', top: '#7a3a8a', legs: '#5a3a6a' },
+  torin: { hair: '#9a9a9a', top: '#5a5a64', legs: '#4a4a52' },
+  vill1: { hair: '#4a3018', top: '#4a7a3a', legs: '#5a4a30' },
+  vill2: { hair: '#3a2a18', top: '#7a4a2a', legs: '#5a3a22' }
+};
+const PLAYER_PAL3D = { hair: '#4a3018', skin: '#e0a878', top: '#3a6ab5', legs: '#7a5230' };
+const MONSTER_BAR_Y = { rat: 0.8, slime: 1.0, wolf: 1.35, bear: 1.85, troll: 2.35 };
+const MONSTER_SHADOW_R = { rat: 0.4, slime: 0.5, wolf: 0.6, bear: 0.8, troll: 0.8 };
+const CHUNK_R = 6; // chunk culling radius (16-tile chunks)
+
+function init3D() {
+  try {
+    if (window.location.search.includes('nogl')) { console.log('3D disabled via ?nogl — using classic 2D renderer'); return; }
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xcfe0ec);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.5, 700);
+
+    const hemi = new THREE.HemisphereLight(0xbfd8ec, 0x44502e, 0.9);
+    const sun = new THREE.DirectionalLight(0xfff1d6, 1.7);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    const sc = sun.shadow.camera;
+    sc.left = -34; sc.right = 34; sc.top = 34; sc.bottom = -34; sc.near = 2; sc.far = 110;
+    sun.shadow.bias = -0.0004;
+    const sunTarget = new THREE.Object3D();
+    scene.add(hemi, sun, sunTarget);
+    sun.target = sunTarget;
+
+    R3D = {
+      three: THREE, renderer, scene, camera, hemi, sun, sunTarget,
+      groundMat: new THREE.MeshLambertMaterial({ vertexColors: true }),
+      ray: new THREE.Raycaster(),
+      ndc: new THREE.Vector2(),
+      water: null, sky: null,
+      chunks: new Map(), instances: [], structures: [],
+      playerH: null, weapon: null,
+      pBarBg: null, pBarFg: null,
+      npcObjs: new Map(), monsterObjs: new Map(),
+      hover: null, targetRing: null, floatPool: [],
+      furnaceLight: null, time: 0, renderDead: false, staticsDirty: false
+    };
+    console.log('3D renderer active');
+  } catch (e) {
+    console.warn('WebGL unavailable — using the classic 2D renderer:', e.message);
+    R3D = null;
+  }
+}
+
+function height3(x, y) { return M3D.tileHeightAt(world, x, y); }
+
+function makeFloatSprite3D() {
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 48;
+  const c = cv.getContext('2d');
+  const tex = new THREE.CanvasTexture(cv);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sp.scale.set(2.6, 0.98, 1);
+  sp.visible = false;
+  sp._ctx = c; sp._txt = '';
+  R3D.scene.add(sp);
+  return sp;
+}
+
+function drawFloatText3D(sp, text, color) {
+  const key = text + '|' + color;
+  if (sp._txt === key) return;
+  sp._txt = key;
+  const c = sp._ctx;
+  c.clearRect(0, 0, 128, 48);
+  c.font = 'bold 26px monospace';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.lineWidth = 5;
+  c.strokeStyle = 'rgba(0,0,0,0.85)';
+  c.strokeText(text, 64, 24);
+  c.fillStyle = color;
+  c.fillText(text, 64, 24);
+  sp.material.map.needsUpdate = true;
+}
+
+function makeChunk3D(bx, by) {
+  const s = R3D, k = bx + ',' + by;
+  if (s.chunks.has(k)) return;
+  const geo = M3D.buildChunkGeometry(world, bx, by);
+  const m = new THREE.Mesh(geo, s.groundMat);
+  m.position.set(bx * M3D.CHUNK + M3D.CHUNK / 2, 0, by * M3D.CHUNK + M3D.CHUNK / 2);
+  m.receiveShadow = true;
+  s.scene.add(m);
+  s.chunks.set(k, m);
+}
+
+function ensureChunks3D() {
+  const s = R3D, w = world.size;
+  const pcx = Math.floor(g.player.x / M3D.CHUNK), pcy = Math.floor(g.player.y / M3D.CHUNK);
+  let built = 0;
+  for (let dy = -CHUNK_R; dy <= CHUNK_R && built < 3; dy++) {
+    for (let dx = -CHUNK_R; dx <= CHUNK_R && built < 3; dx++) {
+      const bx = pcx + dx, by = pcy + dy;
+      if (bx < 0 || by < 0 || bx * M3D.CHUNK >= w || by * M3D.CHUNK >= w) continue;
+      if (!s.chunks.has(bx + ',' + by)) { makeChunk3D(bx, by); built++; }
+    }
+  }
+}
+
+function buildInstances3D() {
+  const s = R3D, T3 = s.three, w = world.size;
+  for (const im of s.instances) { s.scene.remove(im); im.dispose(); }
+  s.instances = [];
+
+  const terr = world.terrain;
+  const oaks = [], pines = [], ores = { [T.COPPER]: [], [T.TIN]: [], [T.IRON]: [], [T.GOLD]: [] };
+  for (let ty = 0; ty < w; ty++) {
+    for (let tx = 0; tx < w; tx++) {
+      const t = terr[ty * w + tx];
+      if (t === T.OAK) oaks.push([tx + 0.5, ty + 0.5]);
+      else if (t === T.PINE) pines.push([tx + 0.5, ty + 0.5]);
+      else if (t === T.COPPER || t === T.TIN || t === T.IRON || t === T.GOLD) ores[t].push([tx + 0.5, ty + 0.5]);
+    }
+  }
+
+  const tgeo = M3D.treeGeometries(), rgeo = M3D.rockGeometries();
+  const dummy = new T3.Object3D();
+  const mkInst = (geometry, colorHex, list, yOff, variation, jitter, off = [0, 0, 0]) => {
+    if (!list.length) return;
+    const im = new T3.InstancedMesh(geometry, new T3.MeshLambertMaterial({ color: colorHex }), list.length);
+    im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false;
+    const c = new T3.Color();
+    for (let i = 0; i < list.length; i++) {
+      const [x, z] = list[i];
+      dummy.position.set(x + off[0], yOff + off[1], z + off[2]);
+      dummy.rotation.set(0, hash2(x, z, world.seed + 5) * Math.PI * 2, 0);
+      dummy.scale.setScalar(1 - variation / 2 + hash2(x, z, world.seed + 9) * variation);
+      dummy.updateMatrix();
+      im.setMatrixAt(i, dummy.matrix);
+      if (jitter) {
+        c.setHex(colorHex).offsetHSL(0, 0, (hash2(x, z, world.seed + 3) - 0.5) * jitter);
+        im.setColorAt(i, c);
+      }
+    }
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    s.scene.add(im);
+    s.instances.push(im);
+  };
+
+  mkInst(tgeo.oakTrunk, 0x6b4423, oaks, 0.575, 0.25, 0.06);
+  mkInst(tgeo.oakCanopy, 0x4a8a34, oaks, 1.78, 0.35, 0.12);
+  mkInst(tgeo.pineTrunk, 0x5a3a22, pines, 0.35, 0.25, 0.05);
+  mkInst(tgeo.pineCanopy, 0x2a5c30, pines, 1.55, 0.3, 0.1);
+  for (const t of [T.COPPER, T.TIN, T.IRON, T.GOLD]) {
+    const list = ores[t];
+    mkInst(rgeo.base, 0x8a8a8a, list, 0.35, 0.4, 0.08);
+    mkInst(rgeo.patch, M3D.ORE_COLORS[t] || 0x888888, list, 0.45, 0.3, 0.08, [0.16, 0.1, 0.22]);
+  }
+}
+
+function rebuildStatics3D() {
+  const s = R3D, w = world.size;
+  for (const m of s.chunks.values()) { s.scene.remove(m); m.geometry.dispose(); }
+  s.chunks.clear();
+  const pcx = Math.floor(g.player.x / M3D.CHUNK), pcy = Math.floor(g.player.y / M3D.CHUNK);
+  for (let dy = -CHUNK_R; dy <= CHUNK_R; dy++) {
+    for (let dx = -CHUNK_R; dx <= CHUNK_R; dx++) {
+      const bx = pcx + dx, by = pcy + dy;
+      if (bx < 0 || by < 0 || bx * M3D.CHUNK >= w || by * M3D.CHUNK >= w) continue;
+      makeChunk3D(bx, by);
+    }
+  }
+  buildInstances3D();
+  s.staticsDirty = false;
+}
+
+function buildWorld3D() {
+  const s = R3D, T3 = s.three, w = world.size;
+  s.scene.clear();
+  s.scene.add(s.hemi, s.sun, s.sunTarget);
+  s.chunks.clear(); s.instances = []; s.structures = [];
+  s.npcObjs.clear(); s.monsterObjs.clear();
+
+  // sky follows the camera
+  s.sky = M3D.buildSky();
+  s.scene.add(s.camera);
+  s.camera.add(s.sky);
+
+  // water
+  s.water = M3D.buildWater(w);
+  s.water.position.set(w / 2, -0.16, w / 2);
+  s.scene.add(s.water);
+
+  // fog hides the chunk boundary
+  s.scene.fog = new T3.Fog(0xcfe0ec, 55, 100);
+
+  // terrain — prebuild the visible ring
+  const pcx = Math.floor(g.player.x / M3D.CHUNK), pcy = Math.floor(g.player.y / M3D.CHUNK);
+  for (let dy = -CHUNK_R; dy <= CHUNK_R; dy++) {
+    for (let dx = -CHUNK_R; dx <= CHUNK_R; dx++) {
+      const bx = pcx + dx, by = pcy + dy;
+      if (bx < 0 || by < 0 || bx * M3D.CHUNK >= w || by * M3D.CHUNK >= w) continue;
+      makeChunk3D(bx, by);
+    }
+  }
+
+  // instanced trees + ore rocks
+  buildInstances3D();
+
+  // buildings & static objects
+  s.furnaceLight = null;
+  for (const b of world.buildings) {
+    const gr = M3D.buildBuilding(b.type, b.w, b.h);
+    gr.position.set(b.x + b.w / 2, height3(b.x + b.w / 2, b.y + b.h / 2), b.y + b.h / 2);
+    s.scene.add(gr); s.structures.push(gr);
+  }
+  for (const o of world.objects) {
+    const y = height3(o.x + 0.5, o.y + 0.5);
+    let gr;
+    if (o.type === 'well') gr = M3D.buildWell();
+    else if (o.type === 'furnace') gr = M3D.buildFurnace();
+    else if (o.type === 'pot') gr = M3D.buildPot();
+    else gr = M3D.buildStump();
+    gr.position.set(o.x + 0.5, y, o.y + 0.5);
+    s.scene.add(gr); s.structures.push(gr);
+    if (o.type === 'furnace') {
+      const pl = new T3.PointLight(0xff7722, 2.2, 9);
+      pl.position.set(0, 0.7, 0.5);
+      gr.add(pl);
+      s.furnaceLight = pl;
+    }
+  }
+
+  // NPCs
+  for (const n of world.npcs) {
+    const h = M3D.buildHumanoid(NPC_PALS3D[n.pal] || NPC_PALS3D.vill2);
+    h.group.position.set(n.x + 0.5, height3(n.x + 0.5, n.y + 0.5), n.y + 0.5);
+    h.group.add(M3D.makeContactShadow(0.55, 0.35));
+    s.scene.add(h.group);
+    s.npcObjs.set(n.id, h);
+  }
+
+  // player
+  const ph = M3D.buildHumanoid(PLAYER_PAL3D);
+  ph.group.add(M3D.makeContactShadow(0.6, 0.4));
+  const weapon = new T3.Group();
+  const blade = new T3.Mesh(new T3.BoxGeometry(0.09, 0.09, 0.95), new T3.MeshLambertMaterial({ color: 0xc9cdd3 }));
+  blade.position.z = 0.45; blade.castShadow = true;
+  const guard = new T3.Mesh(new T3.BoxGeometry(0.22, 0.07, 0.1), new T3.MeshLambertMaterial({ color: 0x6b4423 }));
+  weapon.add(blade, guard);
+  weapon.position.set(0.45, 0.95, 0.05);
+  weapon.rotation.z = 0.45;
+  ph.group.add(weapon);
+  s.scene.add(ph.group);
+  s.playerH = ph; s.weapon = weapon;
+
+  // player hp bar
+  const barGeo = new T3.PlaneGeometry(1.1, 0.14);
+  s.pBarBg = new T3.Mesh(barGeo, new T3.MeshBasicMaterial({ color: 0x222222, transparent: true }));
+  s.pBarFg = new T3.Mesh(barGeo, new T3.MeshBasicMaterial({ color: 0x2ecc71, transparent: true }));
+  s.scene.add(s.pBarBg, s.pBarFg);
+
+  // monsters
+  for (const m of g.monsters) {
+    const b = M3D.buildMonster(m.type);
+    b.group.add(M3D.makeContactShadow(MONSTER_SHADOW_R[m.type] || 0.6, 0.35));
+    s.scene.add(b.group);
+    const barBg = new T3.Mesh(barGeo, new T3.MeshBasicMaterial({ color: 0x222222, transparent: true }));
+    const barFg = new T3.Mesh(barGeo, new T3.MeshBasicMaterial({ color: 0xc0392b, transparent: true }));
+    barBg.visible = false; barFg.visible = false;
+    s.scene.add(barBg, barFg);
+    s.monsterObjs.set(m, { ...b, barBg, barFg });
+  }
+
+  // hover diamond + attack-target ring
+  s.hover = new T3.Mesh(M3D.buildDiamond(0.95), new T3.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4, depthWrite: false }));
+  s.hover.position.y = 0.06;
+  s.hover.visible = false;
+  s.scene.add(s.hover);
+  const ringGeo = new T3.RingGeometry(0.55, 0.72, 28);
+  ringGeo.rotateX(-Math.PI / 2);
+  s.targetRing = new T3.Mesh(ringGeo, new T3.MeshBasicMaterial({ color: 0xff5050, transparent: true, opacity: 0.85, depthWrite: false }));
+  s.targetRing.position.y = 0.05;
+  s.targetRing.visible = false;
+  s.scene.add(s.targetRing);
+
+  // damage-number sprite pool (survives world rebuilds)
+  for (const f of s.floatPool) { f.visible = false; s.scene.add(f); }
+  while (s.floatPool.length < 12) s.floatPool.push(makeFloatSprite3D());
+
+  s.staticsDirty = false;
+  updateCamera();
+}
+
+function updatePlayer3D() {
+  const s = R3D, p = g.player, h = s.playerH;
+  const bob = M3D.animateHumanoid(h, p.animT, p.moving, 9);
+  h.group.position.set(p.x, height3(p.x, p.y) + bob, p.y);
+  if (p.moving) {
+    if (p._rx === undefined) { p._rx = p.x; p._rz = p.y; }
+    const dx = p.x - p._rx, dz = p.y - p._rz;
+    if (dx * dx + dz * dz > 1e-8) h.group.rotation.y = Math.atan2(dx, dz);
+    p._rx = p.x; p._rz = p.y;
+  } else { p._rx = undefined; p._rz = undefined; }
+  s.weapon.visible = !!g.equip.weapon;
+  if (p.swingT > 0) {
+    const t = 1 - p.swingT / 0.18;
+    s.weapon.rotation.y = Math.sin(t * Math.PI) * 2.4;
+    h.armR.rotation.x = -1.9 * Math.sin(t * Math.PI);
+  }
+  const mh = maxHp(g);
+  const show = p.hp < mh;
+  s.pBarBg.visible = show; s.pBarFg.visible = show;
+  if (show) {
+    const r = clamp(p.hp / mh, 0, 1);
+    s.pBarFg.scale.x = r;
+    s.pBarBg.position.set(p.x, height3(p.x, p.y) + 2.15, p.y);
+    s.pBarFg.position.copy(s.pBarBg.position);
+    s.pBarBg.quaternion.copy(s.camera.quaternion);
+    s.pBarFg.quaternion.copy(s.camera.quaternion);
+    s.pBarFg.position.x -= 0.55 * (1 - r);
+  }
+}
+
+function updateNpc3D(n) {
+  const s = R3D, h = s.npcObjs.get(n.id);
+  if (!h) return;
+  h.group.position.set(n.x + 0.5, height3(n.x + 0.5, n.y + 0.5), n.y + 0.5);
+  const p = g.player;
+  const d = Math.hypot(p.x - (n.x + 0.5), p.y - (n.y + 0.5));
+  if (d < 7) h.group.rotation.y = Math.atan2(p.x - (n.x + 0.5), p.y - (n.y + 0.5));
+}
+
+function updateMonster3D(m) {
+  const s = R3D, o = s.monsterObjs.get(m);
+  if (!o) return;
+  const p = g.player;
+  const near = m.alive && Math.abs(m.x - p.x) < 95 && Math.abs(m.y - p.y) < 95;
+  o.group.visible = near;
+  if (!m.alive) { o.barBg.visible = false; o.barFg.visible = false; return; }
+  o.group.position.set(m.x, height3(m.x, m.y), m.y);
+  if (m.moving) {
+    if (m._rx === undefined) { m._rx = m.x; m._rz = m.y; }
+    const dx = m.x - m._rx, dz = m.y - m._rz;
+    if (dx * dx + dz * dz > 1e-8) o.group.rotation.y = Math.atan2(dx, dz);
+    m._rx = m.x; m._rz = m.y;
+  } else { m._rx = undefined; m._rz = undefined; }
+
+  const t = m.animT;
+  const ex = o.extra;
+  if (ex.humanoid) {
+    const bob = M3D.animateHumanoid(ex.humanoid, t, m.moving, 6);
+    o.group.position.y += bob * 1.3;
+  } else if (ex.legs) {
+    const sw = m.moving ? Math.sin(t * 9) * 0.5 : 0;
+    for (let i = 0; i < ex.legs.length; i++) ex.legs[i].rotation.x = (i % 2 ? 1 : -1) * sw;
+  } else if (ex.blob) {
+    const k = m.moving ? Math.sin(t * 7) * 0.14 : Math.sin(s.time * 2 + m.x * 3) * 0.05;
+    ex.blob.scale.set(1 + k, 0.8 - k, 1 + k);
+    ex.blob.position.y = 0.34 * (0.8 - k) / 0.8;
+  } else if (ex.tail) {
+    ex.tail.rotation.y = Math.sin(t * 12) * 0.5;
+    o.group.position.y += m.moving ? Math.abs(Math.sin(t * 10)) * 0.03 : 0;
+  }
+
+  const flash = m.flash > 0;
+  for (const mt of o.mats) if (mt.emissive) mt.emissive.setHex(flash ? 0x881111 : 0x000000);
+
+  const md = MONSTERS[m.type];
+  const show = m.hp < md.hp;
+  o.barBg.visible = show; o.barFg.visible = show;
+  if (show) {
+    const r = clamp(m.hp / md.hp, 0, 1);
+    o.barFg.scale.x = r;
+    o.barBg.position.set(m.x, height3(m.x, m.y) + (MONSTER_BAR_Y[m.type] || 1.4), m.y);
+    o.barFg.position.copy(o.barBg.position);
+    o.barFg.position.x -= 0.55 * (1 - r);
+    o.barBg.quaternion.copy(s.camera.quaternion);
+    o.barFg.quaternion.copy(s.camera.quaternion);
+  }
+}
+
+function updateMarkers3D() {
+  const s = R3D;
+  if (state !== 'playing' || frozen) {
+    s.hover.visible = false;
+  } else if (hover.target) {
+    const t = hover.target;
+    const col =
+      t.kind === 'monster' ? 0xff6666 :
+        t.kind === 'resource' ? (g.player.action === 'chop' ? 0xaaff66 : 0xffcc55) :
+          t.kind === 'npc' || t.kind === 'obj' || t.kind === 'building' ? 0xffe08a : 0xffffff;
+    s.hover.visible = true;
+    s.hover.material.color.setHex(col);
+    s.hover.position.set(t.x + 0.5, height3(t.x + 0.5, t.y + 0.5) + 0.06, t.y + 0.5);
+  } else {
+    s.hover.visible = false;
+  }
+  const tgt = g.player.target;
+  if (tgt && tgt.alive) {
+    s.targetRing.visible = true;
+    s.targetRing.position.set(tgt.x, height3(tgt.x, tgt.y) + 0.05, tgt.y);
+    const k = 1 + Math.sin(s.time * 5) * 0.08;
+    s.targetRing.scale.set(k, k, k);
+  } else {
+    s.targetRing.visible = false;
+  }
+}
+
+function updateFloats3D() {
+  const s = R3D;
+  for (const sp of s.floatPool) sp.visible = false;
+  let i = 0;
+  for (const f of floats) {
+    if (i >= s.floatPool.length) break;
+    const sp = s.floatPool[i++];
+    drawFloatText3D(sp, f.text, f.color);
+    sp.visible = true;
+    sp.position.set(f.x, height3(f.x, f.y) + 1.7 - f.age * 0.9, f.y);
+    sp.material.opacity = Math.max(0, 1 - f.age / f.life);
+  }
+}
+
+function show3DFailure() {
+  if (els.threefail) return;
+  const d = document.createElement('div');
+  d.id = 'threefail';
+  d.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:99;background:#3a1515;color:#ffd9d9;border:1px solid #a04040;padding:10px 16px;border-radius:8px;font:13px monospace;max-width:80vw;';
+  d.textContent = 'The 3D renderer hit an error — the view is frozen but the game keeps running. Refresh to retry, or add ?nogl to the URL for the classic 2D look.';
+  document.body.appendChild(d);
+  els.threefail = d;
+}
+
+function render3D(dt) {
+  const s = R3D, T3 = s.three;
+  const p = g.player;
+  s.time += dt;
+  if (s.staticsDirty) rebuildStatics3D();
+  ensureChunks3D();
+
+  // smooth third-person follow camera
+  const k = 1 - Math.exp(-6 * dt);
+  s.camera.position.lerp(new T3.Vector3(p.x, 27, p.y + 21), k);
+  s.camera.lookAt(p.x, 1, p.y);
+
+  // sun follows the player so shadows stay sharp
+  s.sun.position.set(p.x + 20, 34, p.y + 14);
+  s.sunTarget.position.set(p.x, 0, p.y);
+  s.sunTarget.updateMatrixWorld();
+
+  s.water.material.uniforms.uTime.value = s.time;
+  if (s.furnaceLight) s.furnaceLight.intensity = 2.2 + Math.sin(s.time * 11) * 0.6 + Math.sin(s.time * 23) * 0.35;
+
+  updatePlayer3D();
+  for (const n of world.npcs) updateNpc3D(n);
+  for (const m of g.monsters) updateMonster3D(m);
+  updateMarkers3D();
+  updateFloats3D();
+
+  s.renderer.render(s.scene, s.camera);
+}
+
+// ---------- rendering (classic 2D fallback) ----------
 
 function visibleRange() {
   const a0 = (-camX - 48) / (TILE_W / 2), a1 = (W - camX + 48) / (TILE_W / 2);
@@ -1843,6 +2342,7 @@ setLevelUpHook((skillId, newLevel) => {
 // ---------- boot ----------
 
 function boot() {
+  init3D();
   resize();
   buildSprites();
   buildSkillsUI();
@@ -1898,7 +2398,14 @@ function frame(ts) {
   if (state === 'playing' || state === 'dead') gameNow += dt;
   if (state === 'playing' && !frozen) update(dt);
   if (world && g) {
-    render();
+    if (R3D) {
+      if (!R3D.renderDead) {
+        try { render3D(dt); }
+        catch (e) { R3D.renderDead = true; console.error('3D render failed:', e); show3DFailure(); }
+      }
+    } else {
+      render();
+    }
     drawMinimap();
     updateHUD();
     if (invDirty) {

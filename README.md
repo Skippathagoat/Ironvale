@@ -1,13 +1,14 @@
 # Ironvale
 
-An **original** isometric pixel-art MMORPG that runs entirely in the browser — in the spirit of the classic old-school MMOs. A huge procedurally generated island (640 × 640 tiles ≈ 409,600 tiles), a town, monsters, quests, shops, and a full gather → craft → fight → level progression loop.
+An **original** 3D MMORPG that runs entirely in the browser — in the spirit of the classic old-school MMOs. A huge procedurally generated island (640 × 640 tiles ≈ 409,600 tiles), a town, monsters, quests, shops, and a full gather → craft → fight → level progression loop.
 
 > Ironvale is an original project. All art is generated procedurally in code at load time (zero binary asset files), all names, world and story are original. It is inspired by the *playstyle* of classic isometric MMORPGs, not by any specific one's assets.
 
 ## Features
 
 - **Huge world**: 640×640-tile procedurally generated island (deterministic per seed) with biomes — beaches, grasslands, forests, hills, mountains and snow peaks — plus the town of **Oldgate** with buildings, roads and a plaza.
-- **Click-to-move** (right-click) and **WASD** movement, A* pathfinding, camera follow, isometric renderer with per-tile cached ground.
+- **Click-to-move** (right-click) and **WASD** movement, A* pathfinding, smooth third-person camera.
+- **Graphics**: real-time 3D (three.js) — vertex-colored heightfield terrain in lazy-loaded chunks, instanced low-poly trees & ore rocks, dynamic sun with soft shadows, distance fog, animated water, glowing furnace, walking animations. If WebGL is unavailable (or the URL has `?nogl`) it automatically falls back to the classic 2D isometric renderer.
 - **7 skills with XP & levels**: Attack, Strength, Defence, Woodcutting, Mining, Smithing, Cooking — classic skill bars with level-ups.
 - **Combat**: melee with 5 monster types (rats, slimes, wolves, bears, rock trolls), hit/miss rolls, damage numbers, monster AI (wander / chase / attack / return), respawns.
 - **Gathering**: chop oak & pine trees, mine copper / tin / iron / gold (higher ores need higher levels); nodes deplete and regrow.
